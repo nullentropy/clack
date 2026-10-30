@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <pattern id="tape" width="96" height="96" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="96" height="96" fill="#17191d"/>
+      <rect width="48" height="96" fill="#f6c21c"/>
+    </pattern>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" fill="#1d2025"/>
+    <rect x="100" y="836" width="824" height="88" fill="url(#tape)"/>
+  </g>
+  <polygon points="512,214 842,772 182,772" fill="#f6c21c" stroke="#f6c21c" stroke-width="72" stroke-linejoin="round"/>
+  <polygon points="512,296 772,736 252,736" fill="none" stroke="#17191d" stroke-width="30" stroke-linejoin="round"/>
+  <g fill="#17191d">
+    <line x1="512" y1="452" x2="512" y2="600" stroke="#17191d" stroke-width="64" stroke-linecap="round"/>
+    <circle cx="512" cy="680" r="38"/>
+  </g>
+</svg>
