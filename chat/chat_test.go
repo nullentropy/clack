@@ -57,6 +57,14 @@ type fakeBackend struct {
 	marked   []TS
 	presence chan bool // each SetAway
 	awayErr  error
+	send     func(text string) (TS, error) // nil posts straight away
+}
+
+func (f *fakeBackend) Send(_ context.Context, _ string, _ TS, text string) (TS, error) {
+	if f.send != nil {
+		return f.send(text)
+	}
+	return TSFromTime(time.Now()), nil
 }
 
 func (f *fakeBackend) Bootstrap(context.Context) (Snapshot, error) {
@@ -70,7 +78,6 @@ func (f *fakeBackend) History(context.Context, string) ([]Message, error) { retu
 func (f *fakeBackend) Replies(context.Context, string, TS) ([]Message, error) {
 	return f.replies, nil
 }
-func (f *fakeBackend) Send(context.Context, string, TS, string) error    { return nil }
 func (f *fakeBackend) Edit(context.Context, string, TS, string) error    { return nil }
 func (f *fakeBackend) React(context.Context, string, TS, string) error   { return nil }
 func (f *fakeBackend) Members(context.Context, string) ([]string, error) { return nil, nil }
@@ -674,5 +681,58 @@ func TestReadCursorDoesNotUndoViewing(t *testing.T) {
 	s.setReadCursor("C1", "1700000001.000000")
 	if n := s.Unread("C1"); n != 0 {
 		t.Fatalf("C1 has %d unread after viewing it and a stale cursor arriving, want 0", n)
+	}
+}
+
+func TestSentMessageShowsBeforeSlackAnswers(t *testing.T) {
+	answer := make(chan error)
+	real := TSFromTime(time.Now().Add(time.Second))
+	b := &fakeBackend{send: func(string) (TS, error) { return real, <-answer }}
+	s, changes := startStore(t, b)
+
+	done := make(chan error)
+	go func() { done <- s.Send(context.Background(), "C1", "", "hello") }()
+	<-changes
+	msgs, _ := s.Timeline("C1")
+	if len(msgs) != 1 || !msgs[0].Pending || msgs[0].Text != "hello" || msgs[0].User != "ME" {
+		t.Fatalf("while sending, timeline = %+v, want one pending hello", msgs)
+	}
+	if _, ok := s.LastOwn("C1", ""); ok {
+		t.Fatal("LastOwn offered a message slack doesn't have yet")
+	}
+
+	answer <- nil
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ = s.Timeline("C1")
+	if len(msgs) != 1 || msgs[0].Pending || msgs[0].TS != real {
+		t.Fatalf("after sending, timeline = %+v, want hello at %s", msgs, real)
+	}
+}
+
+func TestEchoBeforeAnswerIsNotDoubled(t *testing.T) {
+	real := TSFromTime(time.Now().Add(time.Second))
+	var s *Store
+	b := &fakeBackend{send: func(text string) (TS, error) {
+		s.Apply(Posted{Channel: "C1", Msg: Message{TS: real, User: "ME", Text: text}})
+		return real, nil
+	}}
+	s, _ = startStore(t, b)
+	if err := s.Send(context.Background(), "C1", "", "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if msgs, _ := s.Timeline("C1"); len(msgs) != 1 || msgs[0].TS != real || msgs[0].Pending {
+		t.Fatalf("timeline = %+v, want just slack's copy", msgs)
+	}
+}
+
+func TestRefusedSendDisappears(t *testing.T) {
+	s, _ := startStore(t, &fakeBackend{send: func(string) (TS, error) { return "", errors.New("not_in_channel") }})
+	if err := s.Send(context.Background(), "C1", "", "hi"); err == nil {
+		t.Fatal("want the refusal back")
+	}
+	if msgs, _ := s.Timeline("C1"); len(msgs) != 0 {
+		t.Fatalf("timeline = %+v, want empty", msgs)
 	}
 }

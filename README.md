@@ -19,23 +19,21 @@ The last step signs the app as `dev.caution.clack` so macOS lets it post notific
 
 ## Connecting to Slack
 
-clack acts as you through a slack app that you create in your workspace.
+clack acts as you through a slack app that you create in your workspace. Everything the
+app needs (its user scopes, the events it listens for and Socket Mode) is in
+[`slack-manifest.json`](slack-manifest.json), so making one takes a few clicks.
 
-1. Go to <https://api.slack.com/apps> and select **Create New App**, then **From scratch**.
-2. Under **Socket Mode**, turn on Socket Mode. Create an app-level token with the
-   `connections:write` scope. This is the app-level token (`xapp-...`).
-3. Under **OAuth & Permissions**, add these **User Token Scopes**:
-   `channels:read`, `channels:history`, `groups:read`, `groups:history`,
-   `im:read`, `im:history`, `mpim:read`, `mpim:history`, `users:read`, `chat:write`, `files:read`,
-   `channels:write`, `groups:write`, `im:write` and `mpim:write` (to mark what
-   you've read, join channels, set topics and start direct messages),
-   `users:write` (for `/away`), `search:read` (for `/search`),
-   `reactions:read` and `reactions:write` (to show reactions and `/react`), and
-   `files:write` (to upload files you drop on the window).
-4. Under **Event Subscriptions**, turn events on. Under **Subscribe to events on
-   behalf of users**, add `message.channels`, `message.groups`, `message.im`,
-   `message.mpim`, `reaction_added` and `reaction_removed`.
-5. Install the app to the workspace. Copy the **User OAuth Token** (`xoxp-...`).
+1. Start clack and select **Create the Slack app** on the connect screen. Or go to
+   <https://api.slack.com/apps>, select **Create New App**, then **From a manifest**, and
+   paste in `slack-manifest.json`.
+2. Choose the workspace and create the app.
+3. Select **Install to Workspace**, then copy the **User OAuth Token** (`xoxp-...`) from
+   **OAuth & Permissions**.
+4. Under **Basic Information**, generate an **App-Level Token** with the
+   `connections:write` scope (`xapp-...`). This is the one step a manifest can't do.
+
+To change what the app can do later, edit its manifest under **App Manifest** in the app's
+settings and reinstall it.
 
 The first time clack starts without tokens, it asks for both and saves them in
 `~/.config/clack/settings.json` (or under `$XDG_CONFIG_HOME`). If slack rejects them

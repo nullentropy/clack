@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -363,6 +366,18 @@ type setupView struct {
 	cancelSlot, cancel        *caution.Node
 }
 
+//go:embed slack-manifest.json
+var slackManifest []byte
+
+// newAppURL opens slack's create app page with the manifest filled in
+func newAppURL() string {
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, slackManifest); err != nil {
+		panic("slack-manifest.json: " + err.Error()) // caught by the tests
+	}
+	return "https://api.slack.com/apps?new_app=1&manifest_json=" + url.QueryEscape(compact.String())
+}
+
 func newSetupView(a *app, cancel func()) *setupView {
 	v := &setupView{}
 	t := a.tokens()
@@ -381,21 +396,31 @@ func newSetupView(a *app, cancel func()) *setupView {
 	caption := func(text string) *caution.Node {
 		return caution.Label(text).FontSize(12).Weight(600).Color("$inkFaint")
 	}
+	heading := func(text string) *caution.Node { return caution.Label(text).FontSize(16).Weight(700) }
 	v.cancel = caution.Button("Close").OnClick(cancel)
-	v.cancelSlot = caution.HStack()
+	// Close leaves the whole screen, so it ends the card. presence saves as it changes
+	v.cancelSlot = caution.HStack().Kids(caution.Panel().Fill(1))
 	v.form = caution.VStack().Gap(10).Align("stretch").Kids(
-		caution.Label("Paste the two tokens from the Slack app you made for clack. The README says how to make one. "+
-			"They're saved in "+tilde(a.settingsPath())+".").FontSize(13).Color("$inkDim").Wrap(),
+		heading("Slack"),
+		caution.Label("clack talks to Slack through an app you make in your workspace. "+
+			"Create it, install it, then make an app-level token with the connections:write scope "+
+			"under Basic Information.").
+			FontSize(13).Color("$inkDim").Wrap(),
+		caution.HStack().Kids(caution.Button("Create the Slack app").OnClick(func() {
+			if err := openURL(newAppURL()); err != nil {
+				v.status.SetText("couldn't open the browser: " + err.Error())
+			}
+		})),
 		caption("User OAuth Token"),
 		v.userField,
 		caption("App-level token"),
 		appField,
-		caution.Panel().H(4),
-		caution.HStack().Gap(8).Kids(caution.Button("Connect").Primary().OnClick(submit), v.cancelSlot),
+		caution.HStack().Kids(caution.Button("Connect").Primary().OnClick(submit)),
 		caution.Panel().H(12),
-		caution.Label("Presence and notifications").FontSize(16).Weight(700),
+		heading("Presence and notifications"),
 	)
 	v.form.Kids(presenceFields(a, t, caption)...)
+	v.form.Kids(v.cancelSlot)
 	v.card = caution.VStack().Gap(10).Align("stretch").W(520).
 		Anchor(caution.A{CenterX: caution.Px(0), CenterY: caution.Px(0)}).
 		Kids(v.title, v.status)

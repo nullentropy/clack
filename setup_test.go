@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -196,5 +199,35 @@ func TestParseAutoAway(t *testing.T) {
 		if _, err := parseAutoAway(bad); err == nil {
 			t.Errorf("parseAutoAway(%q) accepted it", bad)
 		}
+	}
+}
+
+func TestNewAppLinkCarriesTheManifest(t *testing.T) {
+	u, err := url.Parse(newAppURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		OAuth struct {
+			Scopes struct{ User []string } `json:"scopes"`
+		} `json:"oauth_config"`
+		Settings struct {
+			Events struct {
+				User []string `json:"user_events"`
+			} `json:"event_subscriptions"`
+			SocketMode bool `json:"socket_mode_enabled"`
+		} `json:"settings"`
+	}
+	if err := json.Unmarshal([]byte(u.Query().Get("manifest_json")), &m); err != nil {
+		t.Fatalf("manifest_json: %v", err)
+	}
+	// scopes clack's errors and commands name, so the app slack makes can do them
+	for _, scope := range []string{"files:write", "files:read", "users:read", "users:write", "search:read", "reactions:write", "channels:write"} {
+		if !slices.Contains(m.OAuth.Scopes.User, scope) {
+			t.Errorf("manifest lacks the %s user scope", scope)
+		}
+	}
+	if !slices.Contains(m.Settings.Events.User, "message.im") || !m.Settings.SocketMode {
+		t.Errorf("manifest settings = %+v, want socket mode and message events", m.Settings)
 	}
 }

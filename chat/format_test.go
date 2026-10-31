@@ -1,8 +1,10 @@
 package chat
 
 import (
+	"fmt"
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestFormat(t *testing.T) {
@@ -31,5 +33,25 @@ func TestFormat(t *testing.T) {
 		if got := Format(in, user, channel); !slices.Equal(got, want) {
 			t.Errorf("Format(%q)\n got %+v\nwant %+v", in, got, want)
 		}
+	}
+}
+
+func TestDateReferences(t *testing.T) {
+	now := time.Date(2026, 10, 30, 9, 0, 0, 0, time.Local)
+	at := time.Date(2026, 10, 30, 13, 30, 0, 0, time.Local).Unix()
+	ref := func(format string) string { return fmt.Sprintf("!date^%d^%s", at, format) }
+	cases := map[string]string{
+		ref("{time} - {date_short}"):   "13:30 - Oct 30, 2026",
+		ref("{date_long}"):             "Friday, October 30, 2026",
+		ref("{date_pretty} at {time}"): "today at 13:30",
+		ref("{date_num}^https://x"):    "2026-10-30",
+	}
+	for in, want := range cases {
+		if got, _ := date(in, now); got != want {
+			t.Errorf("date(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := Plain("<!date^notanumber^{time}|soon>", nil, nil); got != "soon" {
+		t.Errorf("a bad date falls back to its label, got %q", got)
 	}
 }

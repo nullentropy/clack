@@ -319,14 +319,15 @@ func (d *Demo) message(l demoLine) Message {
 	return Message{TS: TSFromTime(d.start.Add(-l.ago)), User: l.user, Text: l.text}
 }
 
-func (d *Demo) Send(_ context.Context, channel string, thread TS, text string) error {
+func (d *Demo) Send(_ context.Context, channel string, thread TS, text string) (TS, error) {
 	d.mu.Lock()
 	emit := d.emit
 	d.mu.Unlock()
+	ts := TSFromTime(time.Now())
 	if emit != nil {
-		emit(Posted{Channel: channel, Msg: Message{TS: TSFromTime(time.Now()), User: "U0", Text: text, ThreadTS: thread}})
+		emit(Posted{Channel: channel, Msg: Message{TS: ts, User: "U0", Text: text, ThreadTS: thread}})
 	}
-	return nil
+	return ts, nil
 }
 
 func (d *Demo) Listen(ctx context.Context, emit func(Event)) error {

@@ -101,7 +101,9 @@ func TestSubstituteEditsLastOwnMessage(t *testing.T) {
 	if err := store.Send(context.Background(), "C1", "", "teh build is green"); err != nil {
 		t.Fatal(err)
 	}
-	<-changed
+	for len(changed) > 0 { // Send finished telling subscribers
+		<-changed
+	}
 	w := &window{store: store}
 	w.substitute(target{channel: "C1"}, subst{pattern: "teh", repl: "the"})
 	<-changed

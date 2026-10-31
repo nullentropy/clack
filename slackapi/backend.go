@@ -2,6 +2,7 @@ package slackapi
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nullentropy/clack/chat"
@@ -22,10 +24,13 @@ type Backend struct {
 	Debug   bool
 	self    string
 	handles map[string]string // user handle -> ID, to read group DM names
+
+	mu   sync.Mutex
+	bots map[string]string // bot ID -> name, for apps whose messages don't say
 }
 
 func New(userToken, appToken string) *Backend {
-	return &Backend{api: slack.New(userToken, slack.OptionAppLevelToken(appToken))}
+	return &Backend{api: slack.New(userToken, slack.OptionAppLevelToken(appToken)), bots: map[string]string{}}
 }
 
 func (b *Backend) Bootstrap(ctx context.Context) (chat.Snapshot, error) {
@@ -212,7 +217,7 @@ func (b *Backend) History(ctx context.Context, channel string) ([]chat.Message, 
 	// slack returns newest first
 	out := make([]chat.Message, len(resp.Messages))
 	for i, m := range resp.Messages {
-		out[len(out)-1-i] = message(m.Msg)
+		out[len(out)-1-i] = b.message(ctx, m.Msg)
 	}
 	return out, nil
 }
@@ -255,21 +260,106 @@ var systemSubtypes = map[string]bool{
 	"channel_topic": true, "group_topic": true,
 	"channel_join": true, "group_join": true,
 	"channel_leave": true, "group_leave": true,
+	"huddle_thread": true,
 }
 
-func message(m slack.Msg) chat.Message {
-	return chat.Message{
-		System:     systemSubtypes[m.SubType],
-		TS:         chat.TS(m.Timestamp),
-		User:       m.User,
-		Username:   m.Username,
-		Text:       m.Text,
-		ThreadTS:   chat.TS(m.ThreadTimestamp),
-		Replies:    m.ReplyCount,
-		Files:      files(m.Files),
-		Reactions:  reactions(m.Reactions),
-		ReplyUsers: m.ReplyUsers,
+func (b *Backend) message(ctx context.Context, m slack.Msg) chat.Message {
+	username := m.Username
+	switch {
+	// a user posting through an app, clack included, is still that user
+	case username != "" || m.BotID == "" || m.User != "":
+	case m.BotProfile != nil:
+		username = m.BotProfile.Name
+	default: // incoming webhooks name nobody
+		username = b.botName(ctx, m.BotID)
 	}
+	text := m.Text
+	if m.SubType == "huddle_thread" && text == "" {
+		text = "A huddle started" // as slack writes it, for the huddle's thread to hang off
+	}
+	return chat.Message{
+		System:      systemSubtypes[m.SubType],
+		TS:          chat.TS(m.Timestamp),
+		User:        m.User,
+		Username:    username,
+		Text:        text,
+		ThreadTS:    chat.TS(m.ThreadTimestamp),
+		Replies:     m.ReplyCount,
+		Files:       files(m.Files),
+		Attachments: append(calls(m.Blocks), attachments(m.Attachments)...),
+		Reactions:   reactions(m.Reactions),
+		ReplyUsers:  m.ReplyUsers,
+	}
+}
+
+// calls are the cards for Zoom meetings and other calls: what to click to join,
+// until the call ends
+func calls(blocks slack.Blocks) []chat.Attachment {
+	var out []chat.Attachment
+	for _, b := range blocks.BlockSet {
+		c, ok := b.(*slack.CallBlock)
+		if !ok || c.Call == nil || c.Call.V1 == nil {
+			continue
+		}
+		v := c.Call.V1
+		a := chat.Attachment{Title: cmp.Or(v.Name, "Call")}
+		switch {
+		case v.HasEnded:
+			a.Text = "ended"
+		case v.JoinURL != "":
+			a.Title = "<" + v.JoinURL + "|" + a.Title + ">"
+		}
+		if v.DisplayID != "" && !v.HasEnded {
+			a.Text = "Meeting ID: " + v.DisplayID
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// slack's names for attachment colors
+var attachmentColors = map[string]string{"good": "#2eb67d", "warning": "#ecb22e", "danger": "#e01e5a"}
+
+// botName is an app's name, looked up once per app
+func (b *Backend) botName(ctx context.Context, id string) string {
+	b.mu.Lock()
+	name, ok := b.bots[id]
+	b.mu.Unlock()
+	if ok {
+		return name
+	}
+	bot, err := b.api.GetBotInfoContext(ctx, slack.GetBotInfoParameters{Bot: id})
+	if err != nil {
+		log.Printf("bots.info %s: %v", id, err) // and stays nameless rather than asking for every message
+	} else {
+		name = bot.Name
+	}
+	b.mu.Lock()
+	b.bots[id] = name
+	b.mu.Unlock()
+	return name
+}
+
+func attachments(in []slack.Attachment) []chat.Attachment {
+	var out []chat.Attachment
+	for _, a := range in {
+		c := chat.Attachment{Pretext: a.Pretext, Title: a.Title, Text: a.Text}
+		if a.TitleLink != "" && c.Title != "" {
+			c.Title = "<" + a.TitleLink + "|" + c.Title + ">"
+		}
+		if c == (chat.Attachment{}) {
+			c.Text = a.Fallback
+		}
+		if c == (chat.Attachment{}) {
+			continue
+		}
+		c.Color = attachmentColors[a.Color]
+		if c.Color == "" && a.Color != "" {
+			c.Color = "#" + strings.TrimPrefix(a.Color, "#")
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func reactions(in []slack.ItemReaction) []chat.Reaction {
@@ -345,7 +435,7 @@ func (b *Backend) Replies(ctx context.Context, channel string, thread chat.TS) (
 			return nil, fmt.Errorf("conversations.replies: %w", err)
 		}
 		for _, m := range page {
-			out = append(out, message(m.Msg))
+			out = append(out, b.message(ctx, m.Msg))
 		}
 		if !more || cursor == "" {
 			return out, nil
@@ -354,13 +444,13 @@ func (b *Backend) Replies(ctx context.Context, channel string, thread chat.TS) (
 	}
 }
 
-func (b *Backend) Send(ctx context.Context, channel string, thread chat.TS, text string) error {
+func (b *Backend) Send(ctx context.Context, channel string, thread chat.TS, text string) (chat.TS, error) {
 	opts := []slack.MsgOption{slack.MsgOptionText(text, false)}
 	if thread != "" {
 		opts = append(opts, slack.MsgOptionTS(string(thread)))
 	}
-	_, _, err := b.api.PostMessageContext(ctx, channel, opts...)
-	return err
+	_, ts, err := b.api.PostMessageContext(ctx, channel, opts...)
+	return chat.TS(ts), err
 }
 
 func (b *Backend) Listen(ctx context.Context, emit func(chat.Event)) error {
@@ -406,7 +496,7 @@ func (b *Backend) handle(client *socketmode.Client, ev socketmode.Event, emit fu
 			emit(chat.Reacted{Channel: r.Item.Channel, TS: chat.TS(r.Item.Timestamp), Name: r.Reaction, User: r.User, Removed: true})
 		}
 		if m, ok := api.InnerEvent.Data.(*slackevents.MessageEvent); ok {
-			if e := messageEvent(m); e != nil {
+			if e := b.messageEvent(m); e != nil {
 				emit(e)
 			}
 			// The event carries no topic, so the channel is fetched again.
@@ -439,28 +529,21 @@ func (b *Backend) refresh(channel string, emit func(chat.Event)) {
 	emit(chat.ChannelChanged{Channel: c})
 }
 
-func messageEvent(m *slackevents.MessageEvent) chat.Event {
+func (b *Backend) messageEvent(m *slackevents.MessageEvent) chat.Event {
 	switch m.SubType {
 	case "message_changed":
 		if m.Message == nil {
 			return nil
 		}
-		return chat.Edited{Channel: m.Channel, Msg: message(*m.Message)}
+		return chat.Edited{Channel: m.Channel, Msg: b.message(context.Background(), *m.Message)}
 	case "message_deleted":
 		return chat.Deleted{Channel: m.Channel, TS: chat.TS(m.DeletedTimeStamp)}
 	case "", "bot_message", "thread_broadcast", "me_message", "file_share",
-		"channel_topic", "group_topic", "channel_join", "group_join", "channel_leave", "group_leave":
-		msg := chat.Message{
-			TS:       chat.TS(m.TimeStamp),
-			User:     m.User,
-			Username: m.Username,
-			Text:     m.Text,
-			ThreadTS: chat.TS(m.ThreadTimeStamp),
-			System:   systemSubtypes[m.SubType],
+		"channel_topic", "group_topic", "channel_join", "group_join", "channel_leave", "group_leave", "huddle_thread":
+		if m.Message == nil {
+			return nil
 		}
-		if m.Message != nil {
-			msg.Files = files(m.Message.Files)
-		}
+		msg := b.message(context.Background(), *m.Message) // the whole event, as slackevents copies it here
 		if m.SubType == "thread_broadcast" {
 			msg.ThreadTS = ""
 		}

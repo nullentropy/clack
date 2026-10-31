@@ -382,16 +382,14 @@ func (s *Store) Apply(ev Event) {
 			(c.Kind.IsDM() || !known && strings.HasPrefix(e.Channel, "D") || s.names(e.Msg.Text) || e.Msg.IsReply() && s.isMine(threadKey{e.Channel, e.Msg.ThreadTS})) {
 			alert = &Alert{e.Channel, e.Msg, e.Channel == s.last}
 		}
+		if e.Msg.User == s.snap.Self {
+			s.dropPending(e.Channel, e.Msg.ThreadTS)
+		}
 		if e.Msg.IsReply() {
 			s.bumpReplies(e.Channel, e.Msg.ThreadTS)
 			s.countReply(e.Channel, e.Msg)
-			k := threadKey{e.Channel, e.Msg.ThreadTS}
-			if t, ok := s.threads[k]; ok {
-				s.threads[k] = merge(t, []Message{e.Msg})
-			}
-		} else {
-			s.timeline[e.Channel] = trim(merge(s.timeline[e.Channel], []Message{e.Msg}))
 		}
+		s.put(e.Channel, e.Msg)
 	case Edited:
 		ch.Channel = e.Channel
 		s.index(e.Msg)
@@ -697,7 +695,58 @@ func (s *Store) Download(ctx context.Context, id string, full bool, w io.Writer)
 }
 
 func (s *Store) Send(ctx context.Context, channel string, thread TS, text string) error {
-	return s.backend.Send(ctx, channel, thread, text)
+	s.mu.Lock()
+	m := Message{TS: TSFromTime(time.Now()), User: s.snap.Self, Text: text, ThreadTS: thread, Pending: true}
+	s.put(channel, m)
+	s.mu.Unlock()
+	s.notify(Change{Channel: channel})
+
+	ts, err := s.backend.Send(ctx, channel, thread, text)
+	s.mu.Lock()
+	s.update(channel, func(msgs []Message) []Message {
+		if i, ok := find(msgs, m.TS); ok && msgs[i].Pending {
+			return slices.Delete(msgs, i, i+1)
+		}
+		return msgs
+	})
+	if err == nil && !s.has(channel, thread, ts) {
+		// slack's echo will replace it, bumping the reply count when it does
+		m.TS, m.Pending = ts, false
+		s.put(channel, m)
+	}
+	s.mu.Unlock()
+	s.notify(Change{Channel: channel})
+	return err
+}
+
+// put adds or replaces a message in its timeline, or in its thread if that's loaded
+func (s *Store) put(channel string, m Message) {
+	if !m.IsReply() {
+		s.timeline[channel] = trim(merge(s.timeline[channel], []Message{m}))
+		return
+	}
+	k := threadKey{channel, m.ThreadTS}
+	if t, ok := s.threads[k]; ok {
+		s.threads[k] = merge(t, []Message{m})
+	}
+}
+
+func (s *Store) has(channel string, thread, ts TS) bool {
+	msgs := s.timeline[channel]
+	if thread != "" {
+		msgs = s.threads[threadKey{channel, thread}]
+	}
+	_, ok := find(msgs, ts)
+	return ok
+}
+
+func (s *Store) dropPending(channel string, thread TS) {
+	s.update(channel, func(msgs []Message) []Message {
+		if i := slices.IndexFunc(msgs, func(m Message) bool { return m.Pending && m.ThreadTS == thread }); i >= 0 {
+			return slices.Delete(msgs, i, i+1)
+		}
+		return msgs
+	})
 }
 
 func (s *Store) Upload(ctx context.Context, channel string, thread TS, name string, data []byte) error {
@@ -720,10 +769,12 @@ func (s *Store) Newest(channel string, thread TS) (Message, bool) {
 	if thread != "" {
 		msgs = s.threads[threadKey{channel, thread}]
 	}
-	if len(msgs) == 0 {
-		return Message{}, false
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if !msgs[i].Pending {
+			return msgs[i], true
+		}
 	}
-	return msgs[len(msgs)-1], true
+	return Message{}, false
 }
 
 func (s *Store) Members(ctx context.Context, channel string) ([]string, error) {
@@ -747,7 +798,7 @@ func (s *Store) LastOwn(channel string, thread TS) (Message, bool) {
 		msgs = s.threads[threadKey{channel, thread}]
 	}
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].User == s.snap.Self {
+		if msgs[i].User == s.snap.Self && !msgs[i].Pending {
 			return msgs[i], true
 		}
 	}
@@ -764,12 +815,17 @@ func (s *Store) LastRead(channel string) TS {
 // MarkRead moves the channel's read cursor
 func (s *Store) MarkRead(channel string) {
 	s.mu.Lock()
-	msgs := s.timeline[channel]
-	if len(msgs) == 0 {
+	var newest TS // a message still sending has no slack timestamp to mark
+	for _, m := range slices.Backward(s.timeline[channel]) {
+		if !m.Pending {
+			newest = m.TS
+			break
+		}
+	}
+	if newest == "" {
 		s.mu.Unlock()
 		return
 	}
-	newest := msgs[len(msgs)-1].TS
 	moved := newest > s.lastRead[channel]
 	if moved {
 		s.lastRead[channel] = newest

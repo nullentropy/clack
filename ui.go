@@ -700,14 +700,14 @@ func (w *window) messageRow(m chat.Message, prev *chat.Message, nickW float64, r
 
 	var lines []*caution.Node
 	color := "$ink"
-	if isNote(m) || m.System {
+	if isNote(m) || m.System || m.Pending {
 		color = "$inkDim"
 	}
 	runs := chat.Format(m.Text, w.userName, w.channelName)
 	if m.System && len(runs) > 0 {
 		runs[0].Text = strings.TrimPrefix(runs[0].Text, "@") // "@Arthur has joined the channel" reads as IRC's "arthur has joined"
 	}
-	if len(runs) > 0 || len(m.Files) == 0 {
+	if len(runs) > 0 || len(m.Files) == 0 && len(m.Attachments) == 0 {
 		lines = append(lines, w.body(runs, color)...)
 	}
 	for _, u := range chat.HiddenURLs(m.Text) {
@@ -719,6 +719,9 @@ func (w *window) messageRow(m chat.Message, prev *chat.Message, nickW float64, r
 	}
 	for _, f := range m.Files {
 		lines = append(lines, w.attachment(f, maxW))
+	}
+	for _, a := range m.Attachments {
+		lines = append(lines, w.card(a))
 	}
 	if len(m.Reactions) > 0 {
 		lines = append(lines, w.reactionLine(m.Reactions))
@@ -743,6 +746,63 @@ func (w *window) messageRow(m chat.Message, prev *chat.Message, nickW float64, r
 		caution.VStack().Gap(2).Align("stretch").Fill(1).Kids(lines...),
 		caution.Panel().W(8).H(1),
 	).Tip(m.TS.Time().Format("Monday, January 2 at 15:04"))
+}
+
+func (w *window) card(a chat.Attachment) *caution.Node {
+	var runs []chat.Run
+	for _, part := range []struct {
+		text string
+		bold bool
+	}{{a.Title, true}, {clip(a.Text), false}} {
+		if part.text == "" {
+			continue
+		}
+		if len(runs) > 0 {
+			runs = append(runs, chat.Run{Text: "\n"})
+		}
+		for _, r := range chat.Format(part.text, w.userName, w.channelName) {
+			r.Bold = r.Bold || part.bold
+			runs = append(runs, r)
+		}
+	}
+	bar := a.Color
+	if bar == "" {
+		bar = "$inkFaint"
+	}
+	card := caution.HStack().Gap(8).Align("stretch").Kids(
+		caution.Panel().W(3).Bg(bar),
+		caution.VStack().Gap(2).Align("stretch").Fill(1).Kids(w.body(runs, "$ink")...))
+	if a.Pretext == "" {
+		return card
+	}
+	return caution.VStack().Gap(2).Align("stretch").Kids(append(w.body(chat.Format(a.Pretext, w.userName, w.channelName), "$ink"), card)...)
+}
+
+// cardLines and cardChars bound a card's text, as slack folds long ones
+const (
+	cardLines = 6
+	cardChars = 600
+)
+
+func clip(text string) string {
+	cut := len(text)
+	if lines := strings.SplitAfterN(text, "\n", cardLines+1); len(lines) > cardLines {
+		cut = len(text) - len(lines[cardLines]) - 1
+	}
+	if cut > cardChars {
+		cut = cardChars
+		for !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+	}
+	if cut == len(text) {
+		return text
+	}
+	text = text[:cut]
+	if open := strings.LastIndexByte(text, '<'); open > strings.LastIndexByte(text, '>') {
+		text = text[:open] // don't leave half a link
+	}
+	return strings.TrimRight(text, " \n") + " …"
 }
 
 func replyLine(m chat.Message) string {

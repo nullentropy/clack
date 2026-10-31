@@ -60,17 +60,20 @@ func TSFromTime(t time.Time) TS {
 }
 
 type Message struct {
-	TS        TS
-	User      string // user ID (empty for bots, they have Username instead)
-	Username  string
-	Text      string // Slack mrkdwn
-	ThreadTS  TS
-	Replies   int
-	Files     []File
-	Reactions []Reaction
+	TS          TS
+	User        string // user ID (empty for bots, they have Username instead)
+	Username    string
+	Text        string // Slack mrkdwn
+	ThreadTS    TS
+	Replies     int
+	Files       []File
+	Attachments []Attachment
+	Reactions   []Reaction
 
 	// not a real message (joins, parts, etc)
 	System bool
+	// the user sent it and slack hasn't acked
+	Pending bool
 
 	ReplyUsers []string
 	NewReplies int
@@ -84,11 +87,19 @@ type Reaction struct {
 
 // Equal reports if two messages would render the same
 func (m Message) Equal(o Message) bool {
-	return m.TS == o.TS && m.System == o.System && m.User == o.User && m.Username == o.Username && m.Text == o.Text &&
-		m.ThreadTS == o.ThreadTS && m.Replies == o.Replies && m.NewReplies == o.NewReplies && slices.Equal(m.Files, o.Files) &&
+	return m.TS == o.TS && m.System == o.System && m.Pending == o.Pending && m.User == o.User && m.Username == o.Username && m.Text == o.Text &&
+		m.ThreadTS == o.ThreadTS && m.Replies == o.Replies && m.NewReplies == o.NewReplies && slices.Equal(m.Files, o.Files) && slices.Equal(m.Attachments, o.Attachments) &&
 		slices.EqualFunc(m.Reactions, o.Reactions, func(a, b Reaction) bool {
 			return a.Name == b.Name && slices.Equal(a.Users, b.Users)
 		})
+}
+
+// Attachment is a card an app puts under a message and link previews
+type Attachment struct {
+	Color   string // "#rrggbb", or "" for the default
+	Pretext string // Slack mrkdwn, as are Title and Text
+	Title   string
+	Text    string
 }
 
 // File is an attachment
@@ -182,8 +193,8 @@ type Backend interface {
 	History(ctx context.Context, channel string) ([]Message, error)
 	// Replies returns a thread: its parent, then the replies oldest first
 	Replies(ctx context.Context, channel string, thread TS) ([]Message, error)
-	// Send posts to the channel, or into a thread when thread is set
-	Send(ctx context.Context, channel string, thread TS, text string) error
+	// Send posts to the channel or thread and returns the new message's timestamp
+	Send(ctx context.Context, channel string, thread TS, text string) (TS, error)
 	// Edit replaces the text of one of the user's own messages
 	Edit(ctx context.Context, channel string, ts TS, text string) error
 	// React adds the user's reaction, by emoji name, to a message

@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 
 type sideRow struct {
 	key     string // channel ID
+	num     int    // for alt+N, counting from 1
 	label   string
 	unread  bool
 	mention bool // an unread message names the user
@@ -25,7 +27,7 @@ type sidebar struct {
 }
 
 type sideNodes struct {
-	row, label *caution.Node
+	row, num, label *caution.Node
 }
 
 func newSidebar(team string, open func(id string)) *sidebar {
@@ -34,7 +36,7 @@ func newSidebar(team string, open func(id string)) *sidebar {
 		Anchor(caution.A{Left: caution.Px(0), Right: caution.Px(0), Top: caution.Px(4)})
 	sb.root = caution.DockPanel().Kids(
 		headerBar(
-			caution.Label(team).FontSize(16).Weight(700).Anchor(caution.A{Left: caution.Px(20), CenterY: caution.Px(0)}),
+			caution.Label(team).Mono().FontSize(fontSize).Weight(700).Anchor(caution.A{Left: caution.Px(12), CenterY: caution.Px(0)}),
 		),
 		caution.Scroll().InsetBottom(8).Kids(sb.col),
 	)
@@ -43,7 +45,7 @@ func newSidebar(team string, open func(id string)) *sidebar {
 
 func (sb *sidebar) render(rows []sideRow) {
 	sameKeys := slices.EqualFunc(rows, sb.shown, func(a, b sideRow) bool {
-		return a.key == b.key && a.label == b.label
+		return a.key == b.key && a.num == b.num && a.label == b.label
 	})
 	if !sameKeys {
 		sb.col.Clear()
@@ -64,18 +66,22 @@ func (sb *sidebar) render(rows []sideRow) {
 
 func (sb *sidebar) add(r sideRow) sideNodes {
 	if r.key == "" {
-		sb.col.Add(caution.Panel().H(30).Kids(
-			caution.Label(r.label).FontSize(12).Weight(600).Color("$inkFaint").
-				Anchor(caution.A{Left: caution.Px(16), Bottom: caution.Px(4)}),
+		sb.col.Add(caution.Panel().H(lineHeight + 10).Kids(
+			caution.Label("── " + r.label).Mono().FontSize(fontSize).Color("$inkFaint").
+				Anchor(caution.A{Left: caution.Px(12), Bottom: caution.Px(2)}),
 		))
 		return sideNodes{}
 	}
 	n := sideNodes{
+		// right aligned in two columns, like weechat's buffer list
+		num: caution.Label(fmt.Sprintf("%2d", r.num)).Mono().FontSize(fontSize).
+			Anchor(caution.A{Left: caution.Px(12), CenterY: caution.Px(0)}),
 		label: caution.Label(r.label).Mono().FontSize(fontSize).
-			Anchor(caution.A{Left: caution.Px(24), Right: caution.Px(8), CenterY: caution.Px(0)}),
+			Anchor(caution.A{Left: caution.Px(12 + 3*monoAdvance), Right: caution.Px(8), CenterY: caution.Px(0)}),
 	}
 	key := r.key
-	n.row = sb.col.Add(caution.Panel().H(24).Kids(
+	n.row = sb.col.Add(caution.Panel().H(lineHeight+2).Kids(
+		n.num,
 		n.label,
 		caution.Glass().Anchor(fill).OnPick(func(float64, float64, *caution.Node) { sb.open(key) }),
 	))
@@ -87,7 +93,7 @@ func style(n sideNodes, r sideRow) {
 	if n.row == nil {
 		return
 	}
-	weight, color, bg := 400, "$inkFaint", "#00000000"
+	weight, color, numColor, bg := 400, "$inkFaint", "$inkFaint", "#00000000"
 	if r.unread {
 		weight, color = 700, "$ink"
 	}
@@ -95,9 +101,10 @@ func style(n sideNodes, r sideRow) {
 		weight, color = 700, "$highlight"
 	}
 	if r.current {
-		color, bg = "$ink", "$accent"
+		color, numColor, bg = "$ink", "$ink", "$accent"
 	}
 	n.label.Weight(weight).Color(color)
+	n.num.Color(numColor)
 	n.row.Bg(bg)
 }
 
@@ -127,9 +134,17 @@ func (w *window) sidebarRows() []sideRow {
 	slices.SortFunc(dms, byLabel)
 	rows := []sideRow{
 		{key: statusKey, label: "status", mention: w.store.UnseenMentions(), current: w.active == statusKey},
-		{label: "Channels"},
+		{label: "channels"},
 	}
 	rows = append(rows, chans...)
-	rows = append(rows, sideRow{label: "Direct messages"})
-	return append(rows, dms...)
+	rows = append(rows, sideRow{label: "direct messages"})
+	rows = append(rows, dms...)
+	num := 0
+	for i := range rows {
+		if rows[i].key != "" {
+			num++
+			rows[i].num = num
+		}
+	}
+	return rows
 }

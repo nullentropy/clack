@@ -2,7 +2,9 @@ package chat
 
 import (
 	"html"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func Plain(text string, user func(id string) string, channel func(id string) string) string {
@@ -67,7 +69,12 @@ func entity(body string, user func(string) string, channel func(string) string) 
 			return "#" + name
 		}
 		return ref
-	case strings.HasPrefix(ref, "!subteam^"), strings.HasPrefix(ref, "!date^"):
+	case strings.HasPrefix(ref, "!date^"):
+		if s, ok := date(ref, time.Now()); ok {
+			return s
+		}
+		return label
+	case strings.HasPrefix(ref, "!subteam^"):
 		return label
 	case strings.HasPrefix(ref, "!"):
 		return "@" + ref[1:]
@@ -75,6 +82,43 @@ func entity(body string, user func(string) string, channel func(string) string) 
 		return label
 	}
 	return strings.TrimPrefix(html.UnescapeString(ref), "mailto:")
+}
+
+// date renders a "!date^1700000000^{date_short} at {time}" reference in
+// local time, with clack's 24 hour clock
+func date(ref string, now time.Time) (string, bool) {
+	parts := strings.Split(ref, "^")
+	if len(parts) < 3 {
+		return "", false
+	}
+	sec, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return "", false
+	}
+	t := time.Unix(sec, 0).In(now.Location())
+	pretty := func(layout string) string {
+		y, m, d := t.Date()
+		switch days := int(time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Sub(time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)).Hours() / 24); days {
+		case 0:
+			return "today"
+		case -1:
+			return "yesterday"
+		case 1:
+			return "tomorrow"
+		}
+		return t.Format(layout)
+	}
+	return strings.NewReplacer(
+		"{date_num}", t.Format("2006-01-02"),
+		"{date}", t.Format("January 2, 2006"),
+		"{date_short}", t.Format("Jan 2, 2006"),
+		"{date_long}", t.Format("Monday, January 2, 2006"),
+		"{date_pretty}", pretty("January 2, 2006"),
+		"{date_short_pretty}", pretty("Jan 2, 2006"),
+		"{date_long_pretty}", pretty("Monday, January 2, 2006"),
+		"{time}", t.Format("15:04"),
+		"{time_secs}", t.Format("15:04:05"),
+	).Replace(parts[2]), true
 }
 
 // Run is a stretch of message text in one style. a Pre run is a code block

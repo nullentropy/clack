@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -148,4 +149,19 @@ func dial(t *testing.T, mount caution.MountFunc) *websocket.Conn {
 	}
 	t.Cleanup(func() { c.Close() })
 	return c
+}
+
+func TestLongCardsAreClipped(t *testing.T) {
+	short := "*Where:* zoom\n*Guests:* you"
+	if got := clip(short); got != short {
+		t.Fatalf("clip(short) = %q", got)
+	}
+	tall := strings.Repeat("line\n", 20)
+	if got := clip(tall); strings.Count(got, "\n") != cardLines-1 || !strings.HasSuffix(got, " …") {
+		t.Fatalf("clip(tall) = %q, want %d lines ending in …", got, cardLines)
+	}
+	wide := strings.Repeat("x", cardChars-10) + " <https://github.com/pull/1|a pull request>"
+	if got := clip(wide); strings.Contains(got, "<") {
+		t.Fatalf("clip(wide) = %q, left half a link", got)
+	}
 }
