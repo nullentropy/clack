@@ -299,8 +299,10 @@ func (w *window) fx(arg string) {
 		on := func(b bool) string { return map[bool]string{true: "on", false: "off"}[b] }
 		current := cmp.Or(cfg.effect, "none")
 		w.notice("window effect: " + current + " · choose from " + strings.Join(effectNames(), ", ") + ", or off")
-		w.notice(fmt.Sprintf("ping %s · shimmer %s · sidebar %s", on(cfg.ping), on(cfg.shimmer), on(cfg.sidebar)))
-		w.notice("/fx crt sets the window effect, /fx shimmer on turns on an extra")
+		w.notice("ping " + on(cfg.ping) + ": glitch the window when a DM or mention arrives")
+		w.notice("shimmer " + on(cfg.shimmer) + ": color sweeps through messages that mention you")
+		w.notice("sidebar " + on(cfg.sidebar) + ": animated sidebar background")
+		w.notice("/fx crt sets the window effect, /fx shimmer on or off toggles one of these")
 	case slices.Contains(extras, name):
 		if state != "on" && state != "off" {
 			w.notice("/fx " + name + " on, or off")
