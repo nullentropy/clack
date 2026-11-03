@@ -42,7 +42,7 @@ func main() {
 	serveFonts()
 	caution.ServeClient()
 	if *nativeFlag || native.InBundle() {
-		if err := native.Run(a.mount, native.Options{Title: "clack", W: 1180, H: 780}); err != nil {
+		if err := native.Run(a.mount, native.Options{Title: "clack", W: 1180, H: 780, MaxFPS: animationFPS}); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -50,3 +50,6 @@ func main() {
 	log.Printf("clack on http://localhost%s", *addr)
 	log.Fatal(caution.Serve(*addr, a.mount))
 }
+
+// animationFPS caps animation-only repaints; input and patches still paint at once
+const animationFPS = 30

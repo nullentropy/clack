@@ -602,6 +602,33 @@ func TestPingsCountUnseenMentionsAndUnreadOnesInOpenChannels(t *testing.T) {
 	}
 }
 
+func TestPingsCountWhatWouldNotify(t *testing.T) {
+	at := func(sec int) TS { return TSFromTime(time.Now().Add(time.Duration(sec) * time.Second)) }
+	parent := at(1)
+	s, changes := startStore(t, &fakeBackend{})
+	s.SetOpen("C1", true)
+	<-changes
+	s.Apply(Posted{Channel: "C1", Msg: Message{TS: parent, User: "ME", Text: "lunch?"}})
+	<-changes
+	s.Apply(Posted{Channel: "C1", Msg: Message{TS: at(2), User: "U1", Text: "nobody named"}})
+	<-changes
+	if n := s.Pings(); n != 0 {
+		t.Fatalf("pings for a plain channel message = %d, want 0", n)
+	}
+	s.Apply(Posted{Channel: "D1", Msg: Message{TS: at(3), User: "U1", Text: "hey"}})
+	<-changes
+	s.Apply(Posted{Channel: "C1", Msg: Message{TS: at(4), User: "U1", Text: "sure", ThreadTS: parent}})
+	<-changes
+	if n := s.Pings(); n != 2 {
+		t.Fatalf("pings = %d, want the DM and the reply in my thread", n)
+	}
+	s.MarkRead("D1")
+	s.MarkThreadRead("C1", parent)
+	if n := s.Pings(); n != 0 {
+		t.Fatalf("after reading both, pings = %d", n)
+	}
+}
+
 func TestTimelineIsBounded(t *testing.T) {
 	s, changes := startStore(t, &fakeBackend{})
 	base := time.Now().Add(time.Second)

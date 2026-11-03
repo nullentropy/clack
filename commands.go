@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -35,6 +36,10 @@ PRESENCE AND NOTIFICATIONS
 
 CLACK
   /theme name            dark, light or terminal
+  /fx name               crt, amber, green, vhs, dither, glow, film; off stops it
+  /fx ping on            glitch the window when a DM or mention arrives
+  /fx shimmer on         color sweeps through messages that mention you
+  /fx sidebar on         animated sidebar background
   /settings, /tokens     tokens, presence and notifications
   /help                  this
   /quit, /exit           exit clack
@@ -43,7 +48,7 @@ KEYS
   Tab                    complete a name: gr → @Arthur Dent
   Alt+1…9, Cmd+1…9       open the Nth buffer
   Alt+↑, Alt+↓           previous or next buffer
-  Cmd+K, Ctrl+K          quick switcher
+  Cmd+K, Ctrl+K          quick switcher; ↑ ↓ to pick, Enter to open
   Esc                    close a popup
 
 MOUSE
@@ -83,6 +88,8 @@ func (w *window) command(to target, text string) bool {
 		w.react(to, arg)
 	case "theme":
 		w.theme(arg)
+	case "fx":
+		w.fx(arg)
 	case "notify":
 		w.notify(arg)
 	case "away":
@@ -281,6 +288,31 @@ func (w *window) theme(name string) {
 	}
 	if err := w.app.setTheme(strings.ToLower(name)); err != nil {
 		w.notice(err.Error())
+	}
+}
+
+func (w *window) fx(arg string) {
+	name, state, _ := strings.Cut(strings.ToLower(arg), " ")
+	switch {
+	case name == "":
+		cfg := w.app.fx()
+		on := func(b bool) string { return map[bool]string{true: "on", false: "off"}[b] }
+		current := cmp.Or(cfg.effect, "none")
+		w.notice("window effect: " + current + " · choose from " + strings.Join(effectNames(), ", ") + ", or off")
+		w.notice(fmt.Sprintf("ping %s · shimmer %s · sidebar %s", on(cfg.ping), on(cfg.shimmer), on(cfg.sidebar)))
+		w.notice("/fx crt sets the window effect, /fx shimmer on turns on an extra")
+	case slices.Contains(extras, name):
+		if state != "on" && state != "off" {
+			w.notice("/fx " + name + " on, or off")
+			return
+		}
+		if err := w.app.setExtra(name, state == "on"); err != nil {
+			w.notice(err.Error())
+		}
+	default:
+		if err := w.app.setEffect(name); err != nil {
+			w.notice(err.Error())
+		}
 	}
 }
 

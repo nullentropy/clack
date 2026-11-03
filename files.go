@@ -27,6 +27,18 @@ func (a *app) serveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	full := r.URL.Query().Has("full")
+	if frame := r.URL.Query().Get("frame"); frame != "" {
+		data, err := a.serveFrame(r.Context(), store, id, full, frame)
+		if err != nil {
+			log.Printf("file %s frame %s: %v", id, frame, err)
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		w.Write(data)
+		return
+	}
 	var buf bytes.Buffer
 	err := store.Download(r.Context(), id, full, &buf)
 	data := buf.Bytes()

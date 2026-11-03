@@ -37,10 +37,14 @@ func configDir() string {
 type settings struct {
 	UserToken string `json:"user_token"`
 	AppToken  string `json:"app_token"`
-	AutoAway  string `json:"auto_away,omitempty"` // idle time before going away, such as "10m"; empty is never
-	AutoBack  bool   `json:"auto_back,omitempty"` // typing while away comes back
-	Quiet     bool   `json:"quiet,omitempty"`     // no OS notifications
-	Theme     string `json:"theme,omitempty"`     // one of themes; empty is the default
+	AutoAway  string `json:"auto_away,omitempty"`  // idle time before going away, such as "10m"; empty is never
+	AutoBack  bool   `json:"auto_back,omitempty"`  // typing while away comes back
+	Quiet     bool   `json:"quiet,omitempty"`      // no OS notifications
+	Theme     string `json:"theme,omitempty"`      // one of themes; empty is the default
+	Effect    string `json:"effect,omitempty"`     // one of effects; empty is none
+	FXPing    bool   `json:"fx_ping,omitempty"`    // glitch the window when a DM or mention arrives
+	FXShimmer bool   `json:"fx_shimmer,omitempty"` // color sweeps through messages that mention the user
+	FXSidebar bool   `json:"fx_sidebar,omitempty"` // animated sidebar background
 }
 
 func loadSettings(path string) (settings, error) {
@@ -79,6 +83,7 @@ type app struct {
 	debug bool // log Slack's live events
 
 	dock dock
+	gifs gifCache
 
 	mu         sync.Mutex
 	store      *chat.Store
@@ -89,6 +94,7 @@ type app struct {
 	subs       map[int]func()
 	nextSub    int
 	focused    map[*screen]bool // sessions whose window has focus
+	screens    map[*screen]bool
 }
 
 func (a *app) setFocused(sc *screen, focused bool) {
@@ -298,9 +304,24 @@ func (a *app) mount(s *caution.Session) *caution.Node {
 		}
 	})
 	cancel := a.subscribe(func() { s.Update(sc.refresh) })
-	go func() { <-s.Done(); cancel(); a.setFocused(sc, false) }()
+	a.addScreen(sc, true)
+	go func() { <-s.Done(); cancel(); a.setFocused(sc, false); a.addScreen(sc, false) }()
 	sc.root = sc.view()
+	sc.applyEffect()
 	return sc.root
+}
+
+func (a *app) addScreen(sc *screen, open bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.screens == nil {
+		a.screens = map[*screen]bool{}
+	}
+	if open {
+		a.screens[sc] = true
+	} else {
+		delete(a.screens, sc)
+	}
 }
 
 type screen struct {
@@ -313,6 +334,10 @@ type screen struct {
 	focused  bool
 	asked    bool
 	askedGen int
+	fx       *caution.Node // the node carrying the effect
+	fxFrag   string
+	effect   string    // the window effect's name
+	glitchAt time.Time // when the latest ping glitch started, zero when none is running
 }
 
 func (sc *screen) isFocused() bool { return sc.focused }
@@ -323,6 +348,73 @@ func (sc *screen) refresh() {
 		sc.root = n
 		sc.s.SetRoot(n)
 	}
+	sc.applyEffect()
+}
+
+// applyEffect puts the chosen effects on the root and the window
+func (sc *screen) applyEffect() {
+	cfg := sc.a.fx()
+	if sc.win != nil {
+		sc.win.setFX(cfg, sc.a.theme())
+	}
+	sc.effect = cfg.effect
+	fx := rootFX(sc.effect, sc.glitchLeft())
+	if sc.fx == sc.root && sc.fxFrag == fx.Frag {
+		return
+	}
+	if sc.fx != nil && sc.fx != sc.root {
+		sc.fx.Effect(caution.FX{}) // the setup view and window swap roots
+	}
+	sc.fx, sc.fxFrag = sc.root, fx.Frag
+	sc.root.Effect(fx)
+}
+
+// glitchLeft is the ping glitch's strength, 1 as it starts down to 0
+func (sc *screen) glitchLeft() float64 {
+	if sc.glitchAt.IsZero() {
+		return 0
+	}
+	return max(0, 1-float64(time.Since(sc.glitchAt))/float64(glitchFor))
+}
+
+// glitch runs the ping glitch, restarting it when one is already running
+func (sc *screen) glitch() {
+	running := !sc.glitchAt.IsZero()
+	sc.glitchAt = time.Now()
+	sc.applyEffect()
+	if running {
+		return
+	}
+	go func() {
+		tick := time.NewTicker(40 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-sc.s.Done():
+				return
+			case <-tick.C:
+			}
+			ended := make(chan bool, 1)
+			sc.s.Update(func() {
+				g := sc.glitchLeft()
+				if g == 0 {
+					sc.glitchAt = time.Time{}
+					sc.applyEffect()
+				} else {
+					sc.root.Effect(rootFX(sc.effect, g)) // effects take no uniform patches, so the whole effect goes again
+				}
+				ended <- g == 0
+			})
+			select {
+			case <-sc.s.Done():
+				return
+			case end := <-ended:
+				if end {
+					return
+				}
+			}
+		}
+	}()
 }
 
 func (sc *screen) view() *caution.Node {

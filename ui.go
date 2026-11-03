@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"hash/fnv"
@@ -55,11 +56,16 @@ type window struct {
 	focused     func() bool // whether the window has the user's attention
 	unsubscribe func()
 
-	active     string             // a channel ID, or statusKey
-	newSince   chat.TS            // the read cursor when active opened with unread messages
-	notes      []statusEntry      // lines commands added to the status buffer
-	statusTo   map[chat.TS]string // status buffer messages, by TS, to the channel each opens
-	cleared    map[string]chat.TS // per buffer, the last message /clear hid
+	backdrop *caution.Node
+	backFrag string // what backdrop shows, "" for nothing
+	shimmer  bool
+
+	active     string                    // a channel ID, or statusKey
+	newSince   chat.TS                   // the read cursor when active opened with unread messages
+	notes      []statusEntry             // lines commands added to the status buffer
+	local      map[string][]chat.Message // command output in other buffers, shown only here
+	statusTo   map[chat.TS]string        // status buffer messages, by TS, to the channel each opens
+	cleared    map[string]chat.TS        // per buffer, the last message /clear hid
 	subtitle   string
 	shownTitle string
 	drafts     map[target]string // unsent composer text, per channel or thread
@@ -77,10 +83,11 @@ type window struct {
 	threadLog      *logView
 	threadComposer *caution.Node
 
-	overlay  *caution.Node // the quick switcher or a full-size image
-	mentions map[string]string
-	dropHint *caution.Node // shown while files are dragged over the window
-	threadW  float64       // the thread pane's width
+	overlay    *caution.Node
+	fitOverlay func(width, height float64) // resizes the overlay with the window, when it should
+	mentions   map[string]string
+	dropHint   *caution.Node // shown while files are dragged over the window
+	threadW    float64       // the thread pane's width
 }
 
 // newWindow makes sc's view of store
@@ -130,11 +137,17 @@ func newWindow(sc *screen, store *chat.Store) *window {
 	w.threadW = threadWidth
 	w.content.OnSplitResize(func(pos float64) { w.threadW = pos; w.content.SplitPos(pos) })
 
+	w.backdrop = caution.Panel()
 	w.root = caution.Panel().Kids(caution.HSplit().SplitPos(260).SplitMin(180, 360).Anchor(fill).Kids(
-		caution.Panel().Bg("$panelAlt").Kids(w.sidebar.root.Anchor(fill)),
+		caution.Panel().Bg("$panelAlt").Kids(w.backdrop.Anchor(fill), w.sidebar.root.Anchor(fill)),
 		w.content,
 	))
 
+	s.OnResize(func(width, height float64) {
+		if w.fitOverlay != nil {
+			w.fitOverlay(width, height)
+		}
+	})
 	w.unsubscribe = store.Subscribe(func(c chat.Change) { s.Update(func() { w.changed(c) }) })
 	go func() { <-s.Done(); w.unsubscribe() }()
 
@@ -412,7 +425,21 @@ func (w *window) post(to target, text string) {
 	}()
 }
 
-func (w *window) notice(text string) { w.status.SetText(text) }
+const maxLocal = 50
+
+// notice adds a line just for the user
+func (w *window) notice(text string) {
+	if w.active == statusKey || w.active == "" {
+		w.note(text)
+		return
+	}
+	if w.local == nil {
+		w.local = map[string][]chat.Message{}
+	}
+	lines := append(w.local[w.active], chat.Message{TS: chat.TSFromTime(time.Now()), Username: noteNick, Text: text})
+	w.local[w.active] = lines[max(0, len(lines)-maxLocal):]
+	w.renderTimeline()
+}
 
 func (w *window) openThread(channel string, ts chat.TS) {
 	if t := (target{channel, ts}); t != w.thread {
@@ -439,6 +466,29 @@ func (w *window) closeThread() {
 	w.thread = target{}
 	w.threadView.Remove()
 	w.composer.Focus()
+}
+
+func (w *window) setFX(cfg fxSettings, theme map[string]string) {
+	var back caution.FX
+	if cfg.sidebar {
+		back = backdrop(theme)
+	}
+	// the theme's colors are in the frag's uniforms, so compare those too
+	if key := back.Frag + fmt.Sprint(back.Uniforms); key != w.backFrag {
+		w.backFrag = key
+		w.backdrop.Clear()
+		if back.Frag != "" {
+			w.backdrop.Add(caution.Shader(back).Anchor(fill))
+		}
+	}
+	if cfg.shimmer != w.shimmer {
+		w.shimmer = cfg.shimmer
+		w.timeline.key, w.threadLog.key = "", "" // rows are cached, so build them again
+		w.renderTimeline()
+		if w.thread.channel != "" {
+			w.renderThread()
+		}
+	}
 }
 
 func (w *window) renderThread() *caution.Node {
@@ -522,6 +572,9 @@ func (w *window) renderTimeline() *caution.Node {
 		return w.renderStatusBuffer()
 	}
 	msgs, _ := w.store.Timeline(w.active)
+	if lines := w.local[w.active]; len(lines) > 0 {
+		msgs = slices.SortedStableFunc(slices.Values(append(msgs, lines...)), func(a, b chat.Message) int { return cmp.Compare(a.TS, b.TS) })
+	}
 	msgs = w.afterClear(w.active, msgs)
 	w.timeline.newSince = w.newSince
 	return w.timeline.sync(w.active+"|"+string(w.newSince), msgs, "No messages yet.")
@@ -743,7 +796,7 @@ func (w *window) messageRow(m chat.Message, prev *chat.Message, nickW float64, r
 		caution.Label(m.TS.Time().Format("15:04")).Mono().FontSize(fontSize).Color("$inkFaint"),
 		nick,
 		caution.Label("│").Mono().FontSize(fontSize).Color("$inkFaint"),
-		caution.VStack().Gap(2).Align("stretch").Fill(1).Kids(lines...),
+		w.textColumn(m, lines),
 		caution.Panel().W(8).H(1),
 	).Tip(m.TS.Time().Format("Monday, January 2 at 15:04"))
 }
@@ -805,6 +858,14 @@ func clip(text string) string {
 	return strings.TrimRight(text, " \n") + " …"
 }
 
+func (w *window) textColumn(m chat.Message, lines []*caution.Node) *caution.Node {
+	col := caution.VStack().Gap(2).Align("stretch").Fill(1).Kids(lines...)
+	if w.shimmer && w.store.MentionsMe(m) {
+		col.Effect(shimmer)
+	}
+	return col
+}
+
 func replyLine(m chat.Message) string {
 	s := fmt.Sprintf("└─ %d %s", m.Replies, plural(m.Replies, "reply", "replies"))
 	if m.NewReplies > 0 {
@@ -831,20 +892,29 @@ func (w *window) attachment(f chat.File, maxW float64) *caution.Node {
 	}
 	scale := min(1, maxW/float64(f.ThumbW), imageH/float64(f.ThumbH))
 	pw, ph := float64(f.ThumbW)*scale, float64(f.ThumbH)*scale
+	img := caution.Image("/files/" + url.PathEscape(f.ID)).Anchor(fill).Fit("contain").Radius(4).Alt(f.Name)
+	w.animate(img, f, false)
 	return caution.HStack().Kids(caution.Panel().W(pw).H(ph).Tip(f.Name).Kids(
-		caution.Image("/files/"+url.PathEscape(f.ID)).Anchor(fill).Fit("contain").Radius(4).Alt(f.Name),
+		img,
 		caution.Glass().Anchor(fill).OnPick(func(float64, float64, *caution.Node) { w.showImage(f) }),
 	))
 }
 
 func (w *window) showImage(f chat.File) {
-	w.showOverlay(caution.Panel().Anchor(fill).Kids(
-		caution.Image("/files/"+url.PathEscape(f.ID)+"?full").Fit("contain").Alt(f.Name).
-			Anchor(caution.A{Left: caution.Px(40), Right: caution.Px(40), Top: caution.Px(40), Bottom: caution.Px(56)}),
-		caution.Label(f.Name+" · click or Esc to close").FontSize(12).Color("$inkDim").
-			Anchor(caution.A{CenterX: caution.Px(0), Bottom: caution.Px(20)}),
-		caution.Glass().Anchor(fill).OnPick(func(float64, float64, *caution.Node) { w.closeOverlay() }),
+	img := caution.Image("/files/" + url.PathEscape(f.ID) + "?full").Fit("contain").Alt(f.Name).
+		Anchor(caution.A{Left: caution.Px(12), Right: caution.Px(12), Top: caution.Px(12), Bottom: caution.Px(12)})
+	dlg := w.showDialog(f.Name, 0, 0, caution.DockPanel().Anchor(fill).Kids(
+		w.closeBar(),
+		caution.Panel().Kids(
+			img,
+			caution.Glass().Anchor(fill).OnPick(func(float64, float64, *caution.Node) { w.closeOverlay() }),
+		),
 	))
+	w.fitOverlay = func(width, height float64) {
+		dlg.CardSize(max(320, width-80), max(240, height-80))
+	}
+	w.fitOverlay(w.s.Viewport())
+	w.animate(img, f, true)
 }
 
 func byteSize(n int) string {

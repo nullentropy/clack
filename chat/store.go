@@ -314,16 +314,22 @@ func (s *Store) SeeMentions() {
 	}
 }
 
+// Pings counts unread messages that would have sent a notification
 func (s *Store) Pings() int {
 	s.mu.Lock()
 	n := len(s.mentions) - s.seenMentions
-	var open []string
+	dm := map[string]bool{}
 	for id := range s.open {
-		open = append(open, id)
+		dm[id] = s.channels[id].Kind.IsDM()
 	}
 	s.mu.Unlock()
-	for _, id := range open {
-		n += s.UnreadMentions(id)
+	for id, isDM := range dm {
+		if isDM {
+			n += s.Unread(id)
+		} else {
+			n += s.UnreadMentions(id)
+		}
+		n += s.NewReplies(id)
 	}
 	return n
 }
@@ -688,6 +694,18 @@ func (s *Store) Download(ctx context.Context, id string, full bool, w io.Writer)
 		return fmt.Errorf("no file %s", id)
 	}
 	url := f.Thumb
+	if full || url == "" {
+		url = f.URL
+	}
+	return s.backend.Download(ctx, url, w)
+}
+
+func (s *Store) DownloadAnim(ctx context.Context, id string, full bool, w io.Writer) error {
+	f, ok := s.File(id)
+	if !ok {
+		return fmt.Errorf("no file %s", id)
+	}
+	url := f.Anim
 	if full || url == "" {
 		url = f.URL
 	}

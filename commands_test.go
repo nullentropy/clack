@@ -150,10 +150,16 @@ func TestMsgSendsWithoutSwitching(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-changed
-	w := &window{store: store, active: "C1", status: caution.Label("")}
+	w := &window{store: store, active: "C1", timeline: testLog()}
 	w.command(target{channel: "C1"}, "/msg arthur tea?")
-	if c := <-changed; c.Channel != "D2" {
-		t.Fatalf("message landed in %q, want D2", c.Channel)
+	// the pending copy announces itself first, then the sent message
+	for range 2 {
+		if c := <-changed; c.Channel != "D2" {
+			t.Fatalf("message landed in %q, want D2", c.Channel)
+		}
+		if _, ok := store.LastOwn("D2", ""); ok {
+			break
+		}
 	}
 	if m, ok := store.LastOwn("D2", ""); !ok || m.Text != "tea?" {
 		t.Fatalf("last own message in D2 = %+v, want tea?", m)
@@ -171,7 +177,7 @@ func TestTopicSetsChannelTopic(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-changed
-	w := &window{store: store, status: caution.Label("")}
+	w := &window{store: store, timeline: testLog()}
 	w.command(target{channel: "C1"}, "/topic Don't panic")
 	<-changed
 	if c, _ := store.Channel("C1"); c.Topic != "Don't panic" {
@@ -271,7 +277,7 @@ func TestReactAddsToNewestMessage(t *testing.T) {
 	<-changed
 	store.Load(context.Background(), "C2")
 	<-changed
-	w := &window{store: store, status: caution.Label("")}
+	w := &window{store: store, timeline: testLog()}
 	w.command(target{channel: "C2"}, "/react :eyes:")
 	<-changed
 	m, _ := store.Newest("C2", "")
@@ -326,5 +332,79 @@ func TestStatusBufferKeepsMentionsUnseenUntilFocused(t *testing.T) {
 	w.markRead()
 	if n := store.Pings(); n != 0 {
 		t.Fatalf("pings after focusing the status buffer = %d, want 0", n)
+	}
+}
+
+func TestCommandOutputIsALineInTheBufferNotTheHeader(t *testing.T) {
+	store := chat.NewStore(&chat.Demo{}, t.TempDir())
+	changed := make(chan struct{}, 8)
+	store.Subscribe(func(chat.Change) { changed <- struct{}{} })
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-changed
+	store.Load(context.Background(), "C1")
+	<-changed
+	w := &window{store: store, active: "C1", app: &app{dir: t.TempDir()},
+		status: caution.Label("Ship-wide news"), timeline: testLog()}
+	w.renderTimeline()
+	before := len(w.timeline.shown)
+	w.command(target{channel: "C1"}, "/fx")
+	shown := w.timeline.shown
+	if len(shown) <= before || !isNote(shown[len(shown)-1]) {
+		t.Fatalf("after /fx the buffer ends with %+v, want a note", shown[len(shown)-1])
+	}
+	if got := w.status.Prop("text"); got != "Ship-wide news" {
+		t.Fatalf("the header says %q, want the topic left alone", got)
+	}
+	if store.Unread("C1") != 0 {
+		t.Fatal("a note counts as unread")
+	}
+	w.active = "C2"
+	w.renderTimeline()
+	w.active = "C1"
+	w.renderTimeline()
+	if !slices.ContainsFunc(w.timeline.shown, isNote) {
+		t.Fatal("the note was lost after switching buffers")
+	}
+}
+
+func testLog() *logView {
+	return newLogView(nickWidth, func(chat.Message) string { return "" },
+		func(chat.Message, *chat.Message, float64) *caution.Node { return caution.Panel() })
+}
+
+func TestSwitcherArrowsMoveTheHighlightAndEnterOpensIt(t *testing.T) {
+	var opened string
+	sw := &switcher{
+		matches: func(q string) []string {
+			if q == "" {
+				return []string{"status", "C1", "C2"}
+			}
+			return []string{"C2"}
+		},
+		label: func(id string) string { return id },
+		pick:  func(id string) { opened = id },
+		list:  caution.VStack(),
+	}
+	sw.filter("")
+	sw.move(1)
+	sw.move(1)
+	sw.choose()
+	if opened != "C2" {
+		t.Fatalf("Down twice then Enter opened %q, want C2", opened)
+	}
+	sw.move(1) // past the end wraps to the top
+	sw.move(-1)
+	sw.move(-1)
+	sw.choose()
+	if opened != "C1" {
+		t.Fatalf("wrapping around opened %q, want C1", opened)
+	}
+	sw.move(1)
+	sw.filter("c2") // typing starts the highlight over
+	sw.choose()
+	if opened != "C2" {
+		t.Fatalf("after typing, Enter opened %q, want the first match", opened)
 	}
 }

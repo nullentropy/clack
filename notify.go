@@ -7,6 +7,9 @@ import (
 )
 
 func (a *app) alert(store *chat.Store, al chat.Alert) {
+	if !al.Open || !a.anyFocused() {
+		a.ping()
+	}
 	if s, err := loadSettings(a.settingsPath()); err != nil || s.Quiet {
 		return
 	}

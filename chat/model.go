@@ -112,8 +112,11 @@ type File struct {
 	Thumb  string
 	ThumbW int
 	ThumbH int
+	Anim   string // an animated preview, for GIFs
 	Err    string // why the preview couldn't be fetched
 }
+
+func (f File) Animated() bool { return f.Mime == "image/gif" }
 
 // IsImage reports if the file has a preview to show inline
 func (f File) IsImage() bool { return strings.HasPrefix(f.Mime, "image/") && f.Thumb != "" }

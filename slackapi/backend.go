@@ -390,6 +390,7 @@ func files(in []slack.File) []chat.File {
 				break
 			}
 		}
+		c.Anim = cmp.Or(f.Thumb480Gif, f.Thumb360Gif) // the thumbs above are stills, even for a GIF
 		out = append(out, c)
 	}
 	return out

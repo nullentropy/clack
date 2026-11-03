@@ -18,8 +18,8 @@ github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHP
 github.com/mattn/go-colorable v0.1.14/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
-github.com/nullentropy/caution v0.25.0 h1:y8kxLMRVUzm6osdHkiPc1KrfBj0Ae/zan5/nRYfywBw=
-github.com/nullentropy/caution v0.25.0/go.mod h1:1Hz2piyBEvHRd/YXX4mNp4qfE1s1Pqv4caxvMJCoEQY=
+github.com/nullentropy/caution v0.26.0 h1:AeHjNOaCAST/oY+CDdpBH/C6Ldssp8q96lU82smgatM=
+github.com/nullentropy/caution v0.26.0/go.mod h1:1Hz2piyBEvHRd/YXX4mNp4qfE1s1Pqv4caxvMJCoEQY=
 github.com/rs/zerolog v1.35.1 h1:m7xQeoiLIiV0BCEY4Hs+j2NG4Gp2o2KPKmhnnLiazKI=
 github.com/rs/zerolog v1.35.1/go.mod h1:EjML9kdfa/RMA7h/6z6pYmq1ykOuA8/mjWaEvGI+jcw=
 github.com/slack-go/slack v0.32.0 h1:N9zo22Hoz5Hx+rXwtRZSdkJP/3FrQ24eBGSf3A5S3EE=

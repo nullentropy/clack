@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"image/gif"
 	"image/png"
 	"io"
 	"math/rand/v2"
@@ -114,6 +115,9 @@ var demoFiles = map[string]map[time.Duration][]File{
 		5 * time.Hour: {
 			{ID: "F1", Name: "improbability-bench.png", Mime: "image/png", Size: 48213, URL: "demo:bench", Thumb: "demo:bench", ThumbW: 720, ThumbH: 405},
 			{ID: "F2", Name: "nutri-matic-notes.pdf", Mime: "application/pdf", Size: 1284113, URL: "demo:notes"},
+		},
+		4 * time.Hour: {
+			{ID: "F3", Name: "drive-spinning-up.gif", Mime: "image/gif", Size: 18000, URL: "demo:spin", Thumb: "demo:spin", ThumbW: 320, ThumbH: 120, Anim: "demo:spin"},
 		},
 	},
 }
@@ -293,6 +297,9 @@ func (d *Demo) SetTopic(ctx context.Context, channel, topic string) error {
 }
 
 func (d *Demo) Download(_ context.Context, url string, w io.Writer) error {
+	if url == "demo:spin" {
+		return gif.EncodeAll(w, spinGIF())
+	}
 	if url != "demo:bench" {
 		return fmt.Errorf("%s isn't available offline", url)
 	}
@@ -311,6 +318,30 @@ func (d *Demo) Download(_ context.Context, url string, w io.Writer) error {
 		fill(image.Rect(x, 350-h, x+56, 350), c)
 	}
 	return png.Encode(w, img)
+}
+
+// spinGIF is a yellow block running along a track
+func spinGIF() *gif.GIF {
+	pal := color.Palette{color.RGBA{0x1d, 0x20, 0x25, 0xff}, color.RGBA{0x55, 0x5a, 0x63, 0xff}, color.RGBA{0xf6, 0xc2, 0x1c, 0xff}}
+	const w, h, steps = 320, 120, 12
+	g := &gif.GIF{Config: image.Config{Width: w, Height: h, ColorModel: pal}}
+	first := image.NewPaletted(image.Rect(0, 0, w, h), pal)
+	for x := 20; x < w-20; x++ {
+		first.SetColorIndex(x, 90, 1)
+	}
+	for i := range steps {
+		x := 20 + i*(w-80)/(steps-1)
+		frame := first
+		if i > 0 {
+			frame = image.NewPaletted(image.Rect(0, 30, w, 80), pal)
+		}
+		draw.Draw(frame, image.Rect(0, 30, w, 80), image.NewUniform(pal[0]), image.Point{}, draw.Src)
+		draw.Draw(frame, image.Rect(x, 40, x+40, 80), image.NewUniform(pal[2]), image.Point{}, draw.Src)
+		g.Image = append(g.Image, frame)
+		g.Delay = append(g.Delay, 8)
+		g.Disposal = append(g.Disposal, gif.DisposalNone)
+	}
+	return g
 }
 
 func (d *Demo) message(l demoLine) Message {
