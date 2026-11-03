@@ -224,6 +224,6 @@ func (a *app) ping() {
 	screens := slices.Collect(maps.Keys(a.screens))
 	a.mu.Unlock()
 	for _, sc := range screens {
-		sc.s.Update(sc.glitch)
+		go sc.s.Update(sc.glitch) // alerts come from the Slack event loop, which must not wait on a window
 	}
 }

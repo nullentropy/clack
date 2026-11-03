@@ -19,6 +19,9 @@ const helpText = `COMMANDS
   /part                  close the buffer in clack (you stay in Slack)
   /msg name text, /m     DM someone without switching buffers
   /me action             send an action
+  /shrug text            send text ¯\_(ツ)_/¯
+  /tableflip text        send text (╯°□°)╯︵ ┻━┻
+  /tableunflip text      send text ┬─┬ノ( º _ ºノ)
   s/old/new/             edit your last message
   /topic text, /t        set the topic; bare shows it
   /who, /names           list members in the status buffer
@@ -76,6 +79,12 @@ func (w *window) command(to target, text string) bool {
 		if arg != "" {
 			w.post(to, "_"+arg+"_")
 		}
+	case "shrug":
+		w.post(to, strings.TrimSpace(arg+` ¯\_(ツ)_/¯`))
+	case "tableflip":
+		w.post(to, strings.TrimSpace(arg+" (╯°□°)╯︵ ┻━┻"))
+	case "tableunflip":
+		w.post(to, strings.TrimSpace(arg+" ┬─┬ノ( º _ ºノ)"))
 	case "clear":
 		w.clear()
 	case "topic", "t":

@@ -213,7 +213,7 @@ func TestEditAndDelete(t *testing.T) {
 }
 
 func TestLoadedThreadFollowsLiveReplies(t *testing.T) {
-	parent := TSFromTime(time.Now())
+	parent := TSFromTime(time.Now().Add(time.Second))
 	first, live := parent+"1", parent+"2"
 	s, changes := startStore(t, &fakeBackend{replies: []Message{
 		{TS: parent, ThreadTS: parent, Replies: 1, User: "U1"},
@@ -599,6 +599,43 @@ func TestPingsCountUnseenMentionsAndUnreadOnesInOpenChannels(t *testing.T) {
 	s.MarkRead("C1")
 	if n := s.Pings(); n != 0 {
 		t.Fatalf("after reading both, pings = %d", n)
+	}
+}
+
+func TestARedeliveredMessageDoesNotAlertOrCountAgain(t *testing.T) {
+	at := func(sec int) TS { return TSFromTime(time.Now().Add(time.Duration(sec) * time.Second)) }
+	s, changes := startStore(t, &fakeBackend{})
+	alerts := 0
+	s.OnAlert(func(Alert) { alerts++ })
+	post := func(channel string, m Message) { s.Apply(Posted{Channel: channel, Msg: m}); <-changes }
+	mine := at(1)
+	post("C1", Message{TS: mine, User: "ME", Text: "lunch?"})
+	reply := Message{TS: at(2), User: "U1", Text: "sure", ThreadTS: mine}
+	dm := Message{TS: at(3), User: "U1", Text: "hey"}
+	for range 2 { // Slack sends an event again when the ack was late
+		post("C1", reply)
+		post("D1", dm)
+	}
+	if alerts != 2 {
+		t.Fatalf("%d alerts, want one for the reply and one for the DM", alerts)
+	}
+	if n := s.Unread("D1"); n != 1 {
+		t.Fatalf("D1 unread = %d, want 1", n)
+	}
+	if m, _ := s.Newest("C1", ""); m.Replies != 1 {
+		t.Fatalf("the thread counts %d replies, want 1", m.Replies)
+	}
+}
+
+func TestAMessageFromBeforeLaunchDoesNotAlert(t *testing.T) {
+	s, changes := startStore(t, &fakeBackend{})
+	alerts := 0
+	s.OnAlert(func(Alert) { alerts++ })
+	// Slack re-sends what the previous run never acked, minutes later
+	s.Apply(Posted{Channel: "D1", Msg: Message{TS: TSFromTime(time.Now().Add(-6 * time.Minute)), User: "U1", Text: "hey"}})
+	<-changes
+	if alerts != 0 {
+		t.Fatal("a DM sent before launch alerted")
 	}
 }
 

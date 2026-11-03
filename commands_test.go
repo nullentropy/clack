@@ -169,6 +169,31 @@ func TestMsgSendsWithoutSwitching(t *testing.T) {
 	}
 }
 
+func TestTableflipSendsTheFlip(t *testing.T) {
+	store := chat.NewStore(&chat.Demo{}, t.TempDir())
+	changed := make(chan struct{}, 8)
+	store.Subscribe(func(chat.Change) { changed <- struct{}{} })
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-changed
+	w := &window{store: store, active: "C1", timeline: testLog()}
+	cases := map[string]string{
+		"/shrug":                 `¯\_(ツ)_/¯`,
+		"/shrug dunno":           `dunno ¯\_(ツ)_/¯`,
+		"/tableflip":             "(╯°□°)╯︵ ┻━┻",
+		"/tableflip mondays":     "mondays (╯°□°)╯︵ ┻━┻",
+		"/tableunflip":           "┬─┬ノ( º _ ºノ)",
+		"/tableunflip calm down": "calm down ┬─┬ノ( º _ ºノ)",
+	}
+	for in, want := range cases {
+		w.command(target{channel: "C1"}, in)
+		for m, _ := store.LastOwn("C1", ""); m.Text != want; m, _ = store.LastOwn("C1", "") {
+			<-changed
+		}
+	}
+}
+
 func TestTopicSetsChannelTopic(t *testing.T) {
 	store := chat.NewStore(&chat.Demo{}, t.TempDir())
 	changed := make(chan struct{}, 8)

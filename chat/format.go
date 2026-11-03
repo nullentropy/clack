@@ -221,10 +221,10 @@ func (f *formatter) inline(s string, style Run) {
 	flush(len(s))
 }
 
-// closer finds the mark that closes the one at s[i], as Slack pairs them
+// closer finds the mark that closes the one at s[i]
 func closer(s string, i int) int {
 	c := s[i]
-	if i > 0 && !edge(s[i-1]) {
+	if i > 0 && (!edge(s[i-1]) || s[i-1] == '\\') {
 		return -1
 	}
 	if i+1 >= len(s) || s[i+1] == ' ' || s[i+1] == '\n' || s[i+1] == c {

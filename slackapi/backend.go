@@ -4,10 +4,16 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"mime"
+	"net/http"
+	"net/url"
+	"path"
 	"regexp"
 	"strings"
 	"sync"
@@ -285,15 +291,14 @@ func (b *Backend) message(ctx context.Context, m slack.Msg) chat.Message {
 		Text:        text,
 		ThreadTS:    chat.TS(m.ThreadTimestamp),
 		Replies:     m.ReplyCount,
-		Files:       files(m.Files),
+		Files:       append(files(m.Files), linkedImages(m.Blocks, m.Attachments)...),
 		Attachments: append(calls(m.Blocks), attachments(m.Attachments)...),
 		Reactions:   reactions(m.Reactions),
 		ReplyUsers:  m.ReplyUsers,
 	}
 }
 
-// calls are the cards for Zoom meetings and other calls: what to click to join,
-// until the call ends
+// calls are the cards for zoom meetings and others: what to click to join until the call ends
 func calls(blocks slack.Blocks) []chat.Attachment {
 	var out []chat.Attachment
 	for _, b := range blocks.BlockSet {
@@ -340,6 +345,41 @@ func (b *Backend) botName(ctx context.Context, id string) string {
 	return name
 }
 
+// linkedImages are images a message links to instead of an upload
+func linkedImages(blocks slack.Blocks, atts []slack.Attachment) []chat.File {
+	var out []chat.File
+	add := func(u, name string, w, h int) {
+		if u == "" {
+			return
+		}
+		if w <= 0 || h <= 0 {
+			w, h = 320, 240 // image blocks don't say, and the image is fit inside
+		}
+		sum := sha1.Sum([]byte(u))
+		f := chat.File{ID: "link-" + hex.EncodeToString(sum[:8]), Name: cmp.Or(name, "image"), URL: u, Thumb: u, ThumbW: w, ThumbH: h, Mime: "image/jpeg"}
+		if p, err := url.Parse(u); err == nil {
+			f.Mime = cmp.Or(mime.TypeByExtension(path.Ext(p.Path)), f.Mime)
+		}
+		if f.Animated() {
+			f.Anim = u
+		}
+		out = append(out, f)
+	}
+	for _, b := range blocks.BlockSet {
+		if img, ok := b.(*slack.ImageBlock); ok {
+			name := img.AltText
+			if img.Title != nil {
+				name = cmp.Or(img.Title.Text, name)
+			}
+			add(img.ImageURL, name, 0, 0)
+		}
+	}
+	for _, a := range atts {
+		add(a.ImageURL, a.Title, a.ImageWidth, a.ImageHeight)
+	}
+	return out
+}
+
 func attachments(in []slack.Attachment) []chat.Attachment {
 	var out []chat.Attachment
 	for _, a := range in {
@@ -347,7 +387,7 @@ func attachments(in []slack.Attachment) []chat.Attachment {
 		if a.TitleLink != "" && c.Title != "" {
 			c.Title = "<" + a.TitleLink + "|" + c.Title + ">"
 		}
-		if c == (chat.Attachment{}) {
+		if c == (chat.Attachment{}) && a.ImageURL == "" {
 			c.Text = a.Fallback
 		}
 		if c == (chat.Attachment{}) {
@@ -419,11 +459,39 @@ func (b *Backend) Mark(ctx context.Context, channel string, ts chat.TS) error {
 }
 
 func (b *Backend) Download(ctx context.Context, url string, w io.Writer) error {
+	if !slackHosted(url) {
+		return fetch(ctx, url, w) // without the token, which is for Slack alone
+	}
 	err := b.api.GetFileContext(ctx, url, w)
 	// if we don't have files:read slack will send us to the sign in page
 	if err != nil && strings.Contains(err.Error(), "sign-in page") {
 		return errors.New("the token can't read files: add the files:read scope and reinstall the Slack app")
 	}
+	return err
+}
+
+func slackHosted(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && (u.Host == "slack.com" || strings.HasSuffix(u.Host, ".slack.com"))
+}
+
+// maxFetch bounds an image fetched from outside slack
+const maxFetch = 32 << 20
+
+func fetch(ctx context.Context, url string, w io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: %s", req.URL.Host, res.Status)
+	}
+	_, err = io.Copy(w, io.LimitReader(res.Body, maxFetch))
 	return err
 }
 
@@ -500,7 +568,7 @@ func (b *Backend) handle(client *socketmode.Client, ev socketmode.Event, emit fu
 			if e := b.messageEvent(m); e != nil {
 				emit(e)
 			}
-			// The event carries no topic, so the channel is fetched again.
+			// the event carries no topic, so the channel is fetched again
 			if m.SubType == "channel_topic" || m.SubType == "group_topic" {
 				go b.refresh(m.Channel, emit)
 			}
@@ -516,7 +584,10 @@ func describe(ev socketmode.Event) string {
 	}
 	s := fmt.Sprintf("%s %s", ev.Type, api.InnerEvent.Type)
 	if m, ok := api.InnerEvent.Data.(*slackevents.MessageEvent); ok {
-		s += fmt.Sprintf(" channel=%s subtype=%q user=%s", m.Channel, m.SubType, m.User)
+		s += fmt.Sprintf(" channel=%s subtype=%q user=%s ts=%s", m.Channel, m.SubType, m.User, m.TimeStamp)
+	}
+	if ev.Request != nil && ev.Request.RetryAttempt > 0 {
+		s += fmt.Sprintf(" retry=%d (%s)", ev.Request.RetryAttempt, ev.Request.RetryReason)
 	}
 	return s
 }

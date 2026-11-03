@@ -59,7 +59,16 @@ type Store struct {
 	subs         map[int]func(Change)
 	nextSub      int
 	alert        func(Alert) // see OnAlert
+	posted []msgKey
+	started TS
 }
+
+type msgKey struct {
+	channel string
+	ts      TS
+}
+
+const maxPosted = 1000
 
 // Alert is something to notify the user about
 type Alert struct {
@@ -124,6 +133,7 @@ func (s *Store) Start(ctx context.Context) error {
 	// nothing sent before launch counts as unread until slack's read cursor gets here
 	now := TSFromTime(time.Now())
 	s.mu.Lock()
+	s.started = now
 	s.snap = snap
 	s.away = snap.Away
 	s.users = make(map[string]User, len(snap.Users))
@@ -365,8 +375,16 @@ func (s *Store) Apply(ev Event) {
 	switch e := ev.(type) {
 	case Posted:
 		ch.Channel = e.Channel
+		key := msgKey{e.Channel, e.Msg.TS}
+		if slices.Contains(s.posted, key) || s.has(e.Channel, e.Msg.ThreadTS, e.Msg.TS) {
+			break
+		}
+		if s.posted = append(s.posted, key); len(s.posted) > maxPosted {
+			s.posted = s.posted[len(s.posted)-maxPosted:]
+		}
 		s.index(e.Msg)
 		fromOther := e.Msg.User != s.snap.Self && !e.Msg.System
+		late := e.Msg.TS < s.started
 		c, known := s.channels[e.Channel]
 		if !known && !s.adding[e.Channel] {
 			s.adding[e.Channel] = true
@@ -377,21 +395,21 @@ func (s *Store) Apply(ev Event) {
 			s.open[e.Channel] = true
 			s.saveLocked()
 		}
-		if fromOther && !s.open[e.Channel] && s.names(e.Msg.Text) {
+		if fromOther && !late && !s.open[e.Channel] && s.names(e.Msg.Text) {
 			s.mentions = append(s.mentions, Mention{e.Channel, e.Msg})
 			if n := len(s.mentions); n > maxMentions {
 				s.mentions = slices.Delete(s.mentions, 0, n-maxMentions)
 				s.seenMentions = max(0, s.seenMentions-(n-maxMentions))
 			}
 		}
-		if fromOther &&
+		if fromOther && !late &&
 			(c.Kind.IsDM() || !known && strings.HasPrefix(e.Channel, "D") || s.names(e.Msg.Text) || e.Msg.IsReply() && s.isMine(threadKey{e.Channel, e.Msg.ThreadTS})) {
 			alert = &Alert{e.Channel, e.Msg, e.Channel == s.last}
 		}
 		if e.Msg.User == s.snap.Self {
 			s.dropPending(e.Channel, e.Msg.ThreadTS)
 		}
-		if e.Msg.IsReply() {
+		if e.Msg.IsReply() && !late {
 			s.bumpReplies(e.Channel, e.Msg.ThreadTS)
 			s.countReply(e.Channel, e.Msg)
 		}

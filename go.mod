@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/gorilla/websocket v1.5.3
-	github.com/nullentropy/caution v0.26.0
+	github.com/nullentropy/caution v0.27.0
 	github.com/slack-go/slack v0.32.0
 	golang.org/x/image v0.45.0
 )

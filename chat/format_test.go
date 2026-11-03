@@ -28,6 +28,7 @@ func TestFormat(t *testing.T) {
 		"before\n```\nx := 1\n```\nafter": {{Text: "before"}, {Text: "x := 1", Pre: true}, {Text: "after"}},
 		"```a &lt; b```":                  {{Text: "a < b", Pre: true}},
 		"unclosed ```code":                {{Text: "unclosed ```code"}},
+		`ok ¯\_(ツ)_/¯`:                    {{Text: `ok ¯\_(ツ)_/¯`}},
 	}
 	for in, want := range cases {
 		if got := Format(in, user, channel); !slices.Equal(got, want) {

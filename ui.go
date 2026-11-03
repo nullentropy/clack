@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -55,6 +56,9 @@ type window struct {
 	app         *app        // for settings
 	focused     func() bool // whether the window has the user's attention
 	unsubscribe func()
+	changesMu   sync.Mutex
+	changes     []chat.Change // waiting for the session goroutine
+	changesKick chan struct{}
 
 	backdrop *caution.Node
 	backFrag string // what backdrop shows, "" for nothing
@@ -93,7 +97,7 @@ type window struct {
 // newWindow makes sc's view of store
 func newWindow(sc *screen, store *chat.Store) *window {
 	s := sc.s
-	w := &window{s: s, store: store, app: sc.a, quit: sc.a.quit, tokens: sc.askTokens, focused: sc.isFocused,
+	w := &window{s: s, store: store, changesKick: make(chan struct{}, 1), app: sc.a, quit: sc.a.quit, tokens: sc.askTokens, focused: sc.isFocused,
 		mentions: map[string]string{}, drafts: map[target]string{}}
 	w.renderTitle()
 
@@ -148,8 +152,8 @@ func newWindow(sc *screen, store *chat.Store) *window {
 			w.fitOverlay(width, height)
 		}
 	})
-	w.unsubscribe = store.Subscribe(func(c chat.Change) { s.Update(func() { w.changed(c) }) })
-	go func() { <-s.Done(); w.unsubscribe() }()
+	w.unsubscribe = store.Subscribe(w.queueChange)
+	go w.deliverChanges()
 
 	if last := store.Last(); store.IsOpen(last) {
 		w.open(last)
@@ -178,6 +182,40 @@ func headerBar(kids ...*caution.Node) *caution.Node {
 	return caution.Panel().Dock("top").H(56).Kids(kids...).Kids(
 		caution.Panel().H(1).Bg("$edge").Anchor(caution.A{Left: caution.Px(0), Right: caution.Px(0), Bottom: caution.Px(0)}),
 	)
+}
+
+// queueChange runs on the goroutine reading slack events, which can't wait
+// for any ui stuff so we don't hold up acks (slack sends again when there's no ack)
+func (w *window) queueChange(c chat.Change) {
+	w.changesMu.Lock()
+	if !slices.Contains(w.changes, c) {
+		w.changes = append(w.changes, c)
+	}
+	w.changesMu.Unlock()
+	select {
+	case w.changesKick <- struct{}{}:
+	default:
+	}
+}
+
+func (w *window) deliverChanges() {
+	defer w.unsubscribe()
+	for {
+		select {
+		case <-w.s.Done():
+			return
+		case <-w.changesKick:
+		}
+		w.changesMu.Lock()
+		cs := w.changes
+		w.changes = nil
+		w.changesMu.Unlock()
+		w.s.Update(func() {
+			for _, c := range cs {
+				w.changed(c)
+			}
+		})
+	}
 }
 
 func (w *window) changed(c chat.Change) {

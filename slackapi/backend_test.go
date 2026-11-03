@@ -178,3 +178,43 @@ func TestHuddlesShowWithTheirThread(t *testing.T) {
 		t.Fatalf("event = %+v, want a system line for the huddle with its 3 replies", got[0])
 	}
 }
+
+func TestGiphyPostsShowTheirGIF(t *testing.T) {
+	payload := `{
+		"type": "event_callback", "event": {
+			"type": "message", "channel": "C1", "bot_id": "B2", "user": "U1", "text": "", "ts": "1700000000.000200",
+			"blocks": [
+				{"type": "image", "image_url": "https://media2.giphy.com/media/abc/giphy.gif?cid=1", "alt_text": "dont panic", "title": {"type": "plain_text", "text": "dont panic"}},
+				{"type": "context", "elements": [{"type": "mrkdwn", "text": "Posted using /giphy"}]}
+			]
+		}
+	}`
+	parsed, err := slackevents.ParseEvent(json.RawMessage(payload), slackevents.OptionNoVerifyToken())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []chat.Event
+	(&Backend{}).handle(nil, socketmode.Event{Type: socketmode.EventTypeEventsAPI, Data: parsed}, func(e chat.Event) {
+		got = append(got, e)
+	})
+	if len(got) != 1 {
+		t.Fatalf("events = %+v, want one Posted", got)
+	}
+	files := got[0].(chat.Posted).Msg.Files
+	if len(files) != 1 || !files[0].IsImage() || !files[0].Animated() || files[0].Anim != "https://media2.giphy.com/media/abc/giphy.gif?cid=1" || files[0].Name != "dont panic" {
+		t.Fatalf("files = %+v, want the GIF", files)
+	}
+}
+
+func TestOnlySlackGetsTheToken(t *testing.T) {
+	for u, want := range map[string]bool{
+		"https://files.slack.com/files-pri/T1-F1/a.png": true,
+		"https://media2.giphy.com/media/abc/giphy.gif":  false,
+		"https://slack.com.evil.example/a.png":          false,
+		"http://files.slack.com/a.png":                  false,
+	} {
+		if slackHosted(u) != want {
+			t.Errorf("slackHosted(%q) = %v, want %v", u, !want, want)
+		}
+	}
+}

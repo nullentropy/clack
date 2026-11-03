@@ -165,3 +165,48 @@ func TestLongCardsAreClipped(t *testing.T) {
 		t.Fatalf("clip(wide) = %q, left half a link", got)
 	}
 }
+
+func TestAStuckWindowDoesNotHoldUpSlackEvents(t *testing.T) {
+	store := chat.NewStore(&chat.Demo{}, t.TempDir())
+	started := make(chan struct{}, 1)
+	store.Subscribe(func(chat.Change) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	})
+	ctx, stop := context.WithCancel(context.Background())
+	t.Cleanup(stop)
+	if err := store.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	a := &app{dir: t.TempDir()}
+	a.use(store, stop)
+	mounted := make(chan *caution.Session, 1)
+	c := dial(t, func(s *caution.Session) *caution.Node {
+		mounted <- s
+		return a.mount(s)
+	})
+	var mount struct{ Root node }
+	if err := c.ReadJSON(&mount); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	(<-mounted).Update(func() { <-release }) // the window stops taking updates, as when its client stops reading
+
+	applied := make(chan struct{})
+	go func() {
+		base := time.Now()
+		for i := range 500 {
+			store.Apply(chat.Posted{Channel: "C1", Msg: chat.Message{TS: chat.TSFromTime(base.Add(time.Duration(i) * time.Millisecond)), User: "U1", Text: "hi"}})
+		}
+		close(applied)
+	}()
+	select {
+	case <-applied:
+	case <-time.After(3 * time.Second):
+		t.Fatal("events stopped being applied while the window was stuck")
+	}
+}
