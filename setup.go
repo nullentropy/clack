@@ -357,8 +357,9 @@ type screen struct {
 	askedGen int
 	fx       *caution.Node // the node carrying the effect
 	fxFrag   string
-	effect   string    // the window effect's name
-	glitchAt time.Time // when the latest ping glitch started, zero when none is running
+	effect   string     // the window effect's name
+	bg       [3]float64 // the theme background, which the effect composites over
+	glitchAt time.Time  // when the latest ping glitch started, zero when none is running
 }
 
 func (sc *screen) isFocused() bool { return sc.focused }
@@ -374,12 +375,12 @@ func (sc *screen) refresh() {
 
 // applyEffect puts the chosen effects on the root and the window
 func (sc *screen) applyEffect() {
-	cfg := sc.a.fx()
+	cfg, theme := sc.a.fx(), sc.a.theme()
 	if sc.win != nil {
-		sc.win.setFX(cfg, sc.a.theme())
+		sc.win.setFX(cfg, theme)
 	}
-	sc.effect = cfg.effect
-	fx := rootFX(sc.effect, sc.glitchLeft())
+	sc.effect, sc.bg = cfg.effect, hexRGB(theme["bg"])
+	fx := rootFX(sc.effect, sc.bg, sc.glitchLeft())
 	if sc.fx == sc.root && sc.fxFrag == fx.Frag {
 		return
 	}
@@ -422,7 +423,7 @@ func (sc *screen) glitch() {
 					sc.glitchAt = time.Time{}
 					sc.applyEffect()
 				} else {
-					sc.root.Effect(rootFX(sc.effect, g)) // effects take no uniform patches, so the whole effect goes again
+					sc.root.Effect(rootFX(sc.effect, sc.bg, g)) // effects take no uniform patches, so the whole effect goes again
 				}
 				ended <- g == 0
 			})

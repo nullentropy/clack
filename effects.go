@@ -53,11 +53,12 @@ float bayer2(vec2 a) { a = floor(a); return fract(a.x / 2.0 + a.y * a.y * 0.75);
 float bayer4(vec2 a) { return bayer2(0.5 * a) * 0.25 + bayer2(a); }
 vec4 effect(vec2 uv) {
   vec4 c = src(uv);
+  vec3 rgb = c.rgb + (1.0 - c.a) * BG; // the window clear behind the root is transparent in src
   // dark backgrounds go solid black and dim text solid white, so only
   // midtones like the selection dither
-  float luma = smoothstep(0.14, 0.55, dot(c.rgb, vec3(0.299, 0.587, 0.114)));
+  float luma = smoothstep(0.14, 0.55, dot(rgb, vec3(0.299, 0.587, 0.114)));
   float on = step(bayer4(uv * u_res) + 0.03, luma);
-  return vec4(vec3(on), 1.0); // opaque, so panes painted by the window clear go black too
+  return vec4(vec3(on), 1.0);
 }`},
 
 	"glow": {Frag: `
@@ -90,12 +91,16 @@ vec4 effect(vec2 uv) {
 
 func phosphor(color string) string {
 	return `
+const vec3 W = vec3(0.299, 0.587, 0.114);
+float lum(vec2 uv) {
+  vec4 c = src(uv);
+  return dot(c.rgb + (1.0 - c.a) * BG, W); // the window clear behind the root is transparent in src
+}
 vec4 effect(vec2 uv) {
   vec2 px = 1.0 / u_res;
-  vec3 w = vec3(0.299, 0.587, 0.114);
-  float l = dot(src(uv).rgb, w);
-  float halo = (dot(src(uv + vec2(1.5 * px.x, 0.0)).rgb, w) + dot(src(uv - vec2(1.5 * px.x, 0.0)).rgb, w) +
-                dot(src(uv + vec2(0.0, 1.5 * px.y)).rgb, w) + dot(src(uv - vec2(0.0, 1.5 * px.y)).rgb, w)) * 0.25;
+  float l = lum(uv);
+  float halo = (lum(uv + vec2(1.5 * px.x, 0.0)) + lum(uv - vec2(1.5 * px.x, 0.0)) +
+                lum(uv + vec2(0.0, 1.5 * px.y)) + lum(uv - vec2(0.0, 1.5 * px.y))) * 0.25;
   l = smoothstep(0.08, 0.85, l) + halo * 0.25;
   l *= 0.85 + 0.15 * sin(uv.y * u_res.y * 3.14159);
   return vec4(` + color + ` * l, 1.0);
@@ -121,8 +126,11 @@ vec4 effect(vec2 uv) {
   return c;
 }`
 
-func rootFX(name string, g float64) caution.FX {
+func rootFX(name string, bg [3]float64, g float64) caution.FX {
 	fx := effects[name]
+	if fx.Frag != "" {
+		fx.Frag = fmt.Sprintf("const vec3 BG = vec3(%.4f, %.4f, %.4f);\n", bg[0], bg[1], bg[2]) + fx.Frag
+	}
 	if g <= 0 {
 		return fx
 	}
@@ -224,6 +232,6 @@ func (a *app) ping() {
 	screens := slices.Collect(maps.Keys(a.screens))
 	a.mu.Unlock()
 	for _, sc := range screens {
-		go sc.s.Update(sc.glitch) // alerts come from the Slack event loop, which must not wait on a window
+		go sc.s.Update(sc.glitch)
 	}
 }
