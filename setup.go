@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,16 +36,17 @@ func configDir() string {
 }
 
 type settings struct {
-	UserToken string `json:"user_token"`
-	AppToken  string `json:"app_token"`
-	AutoAway  string `json:"auto_away,omitempty"`  // idle time before going away, such as "10m"; empty is never
-	AutoBack  bool   `json:"auto_back,omitempty"`  // typing while away comes back
-	Quiet     bool   `json:"quiet,omitempty"`      // no OS notifications
-	Theme     string `json:"theme,omitempty"`      // one of themes; empty is the default
-	Effect    string `json:"effect,omitempty"`     // one of effects; empty is none
-	FXPing    bool   `json:"fx_ping,omitempty"`    // glitch the window when a DM or mention arrives
-	FXShimmer bool   `json:"fx_shimmer,omitempty"` // color sweeps through messages that mention the user
-	FXSidebar bool   `json:"fx_sidebar,omitempty"` // animated sidebar background
+	UserToken   string `json:"user_token"`
+	AppToken    string `json:"app_token"`
+	AutoAway    string `json:"auto_away,omitempty"` // idle time before going away, such as "10m"; empty is never
+	AutoBack    bool   `json:"auto_back,omitempty"` // typing while away comes back
+	Quiet       bool   `json:"quiet,omitempty"`     // no notifications
+	ToastCorner string `json:"toast_corner,omitempty"`
+	Theme       string `json:"theme,omitempty"`      // one of themes; empty is the default
+	Effect      string `json:"effect,omitempty"`     // one of effects; empty is none
+	FXPing      bool   `json:"fx_ping,omitempty"`    // glitch the window when a DM or mention arrives
+	FXShimmer   bool   `json:"fx_shimmer,omitempty"` // color sweeps through messages that mention the user
+	FXSidebar   bool   `json:"fx_sidebar,omitempty"` // animated sidebar background
 }
 
 func loadSettings(path string) (settings, error) {
@@ -94,6 +96,7 @@ type app struct {
 	subs       map[int]func()
 	nextSub    int
 	focused    map[*screen]bool // sessions whose window has focus
+	onChat     map[*screen]bool
 	screens    map[*screen]bool
 }
 
@@ -110,11 +113,29 @@ func (a *app) setFocused(sc *screen, focused bool) {
 	}
 }
 
-// anyFocused reports whether the user is in some clack window
-func (a *app) anyFocused() bool {
+func (a *app) setOnChat(sc *screen, on bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.focused) > 0
+	if a.onChat == nil {
+		a.onChat = map[*screen]bool{}
+	}
+	if on {
+		a.onChat[sc] = true
+	} else {
+		delete(a.onChat, sc)
+	}
+}
+
+func (a *app) watching() []*screen {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var scs []*screen
+	for sc := range a.focused {
+		if a.onChat[sc] {
+			scs = append(scs, sc)
+		}
+	}
+	return scs
 }
 
 // conn is a snapshot of the app's connection state
@@ -305,7 +326,7 @@ func (a *app) mount(s *caution.Session) *caution.Node {
 	})
 	cancel := a.subscribe(func() { s.Update(sc.refresh) })
 	a.addScreen(sc, true)
-	go func() { <-s.Done(); cancel(); a.setFocused(sc, false); a.addScreen(sc, false) }()
+	go func() { <-s.Done(); cancel(); a.setFocused(sc, false); a.setOnChat(sc, false); a.addScreen(sc, false) }()
 	sc.root = sc.view()
 	sc.applyEffect()
 	return sc.root
@@ -430,8 +451,10 @@ func (sc *screen) view() *caution.Node {
 			}
 			sc.win = newWindow(sc, c.store)
 		}
+		sc.a.setOnChat(sc, true)
 		return sc.win.root
 	}
+	sc.a.setOnChat(sc, false)
 	if sc.setup == nil {
 		sc.setup = newSetupView(sc.a, sc.cancelTokens)
 	}
@@ -551,7 +574,15 @@ func presenceFields(a *app, saved settings, caption func(string) *caution.Node) 
 		}
 		note.SetText("saved")
 	})
-	return []*caution.Node{caption("Go away after this long idle in clack"), away, back, notifyBox, note}
+	corner := caution.Select(toastCorners, max(0, slices.Index(toastCorners, a.toastCorner()))).OnSelect(func(i int) {
+		if err := a.updateSettings(func(s *settings) { s.ToastCorner = toastCorners[i] }); err != nil {
+			note.SetText("couldn't save: " + err.Error())
+			return
+		}
+		note.SetText("saved")
+	})
+	return []*caution.Node{caption("Go away after this long idle in clack"), away, back, notifyBox,
+		caption("Corner for notifications while clack has focus"), caution.HStack().Kids(corner), note}
 }
 
 func (v *setupView) show(c conn, canCancel bool) {

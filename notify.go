@@ -7,16 +7,20 @@ import (
 )
 
 func (a *app) alert(store *chat.Store, al chat.Alert) {
-	if !al.Open || !a.anyFocused() {
+	watched := len(a.watching()) > 0
+	if !al.Open || !watched {
 		a.ping()
 	}
 	if s, err := loadSettings(a.settingsPath()); err != nil || s.Quiet {
 		return
 	}
-	if al.Open && a.anyFocused() {
+	if al.Open && watched {
 		return // they're looking at it
 	}
 	title, body := alertText(store, al)
+	if a.toast(al.Channel, title, body) {
+		return
+	}
 	if err := notify(title, body); err != nil {
 		log.Printf("notify: %v", err)
 	}

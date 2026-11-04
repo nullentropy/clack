@@ -35,7 +35,9 @@ PRESENCE AND NOTIFICATIONS
   /away, /back           set yourself away or back
   /autoaway 10m          go away after idling; off stops it
   /autoback on           typing while away brings you back
-  /notify off            stop OS notifications
+  /notify off            stop notifications
+  /notify <corner name>  where they show while clack has focus: top-right,
+                         top-left, bottom-right or bottom-left
 
 CLACK
   /theme name            dark, light or terminal
@@ -272,6 +274,10 @@ func (w *window) autoBack(arg string) {
 }
 
 func (w *window) notify(arg string) {
+	if corner, ok := strings.CutPrefix(arg, "corner"); ok {
+		w.notifyCorner(strings.TrimSpace(corner))
+		return
+	}
 	switch arg {
 	case "on", "off":
 		if err := w.app.updateSettings(func(s *settings) { s.Quiet = arg == "off" }); err != nil {
@@ -280,7 +286,7 @@ func (w *window) notify(arg string) {
 		}
 	case "":
 	default:
-		w.notice("usage: /notify on, or /notify off")
+		w.notice("usage: /notify on, /notify off, or /notify <corner name>")
 		return
 	}
 	if s, _ := loadSettings(w.app.settingsPath()); s.Quiet {
@@ -288,6 +294,21 @@ func (w *window) notify(arg string) {
 	} else {
 		w.notice("DMs, mentions and replies in your threads notify you · /notify off")
 	}
+}
+
+func (w *window) notifyCorner(corner string) {
+	corner = strings.ToLower(corner)
+	if corner != "" {
+		if !slices.Contains(toastCorners, corner) {
+			w.notice("corners: " + strings.Join(toastCorners, ", "))
+			return
+		}
+		if err := w.app.updateSettings(func(s *settings) { s.ToastCorner = corner }); err != nil {
+			w.notice("couldn't save settings: " + err.Error())
+			return
+		}
+	}
+	w.notice("while clack has focus, notifications show in the " + w.app.toastCorner() + " corner")
 }
 
 func (w *window) theme(name string) {

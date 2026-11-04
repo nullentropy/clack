@@ -14,6 +14,49 @@ import (
 )
 
 func TestDraftsStayWithTheirChannel(t *testing.T) {
+	sc, c, mount := mountTestWindow(t)
+	composer := mount.find(func(n node) bool { return n.P["placeholder"] != nil })
+	if composer == nil {
+		t.Fatal("no composer in the mounted window")
+	}
+	onSession := func(fn func()) { runOnSession(t, sc, fn) }
+	shown := func() (v string) {
+		onSession(func() { v, _ = sc.win.composer.Prop("value").(string) })
+		return v
+	}
+	seq := 0
+	typeText := func(text string) {
+		seq++
+		if err := c.WriteJSON(map[string]any{"t": "ev", "id": composer.ID, "ev": "input", "value": text, "seq": seq}); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(3 * time.Second); shown() != text; time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("the session never saw %q typed", text)
+			}
+		}
+	}
+	open := func(id string) { onSession(func() { sc.win.open(id) }) }
+
+	open("C1")
+	typeText("half a thought")
+	open("C2")
+	if v := shown(); v != "" {
+		t.Fatalf("C2's composer shows %q, want it empty", v)
+	}
+	typeText("for engineering")
+	open("C1")
+	if v := shown(); v != "half a thought" {
+		t.Fatalf("back in C1 the composer shows %q, want its draft", v)
+	}
+	open("C2")
+	if v := shown(); v != "for engineering" {
+		t.Fatalf("back in C2 the composer shows %q, want its draft", v)
+	}
+}
+
+func mountTestWindow(t *testing.T) (*screen, *websocket.Conn, node) {
+	t.Helper()
 	store := chat.NewStore(&chat.Demo{}, t.TempDir())
 	started := make(chan struct{}, 1)
 	store.Subscribe(func(chat.Change) {
@@ -47,10 +90,6 @@ func TestDraftsStayWithTheirChannel(t *testing.T) {
 	if err := c.ReadJSON(&mount); err != nil {
 		t.Fatal(err)
 	}
-	composer := mount.Root.find(func(n node) bool { return n.P["placeholder"] != nil })
-	if composer == nil {
-		t.Fatal("no composer in the mounted window")
-	}
 	go func() { // drain updates so the session never blocks on the socket
 		for {
 			if _, _, err := c.ReadMessage(); err != nil {
@@ -58,49 +97,17 @@ func TestDraftsStayWithTheirChannel(t *testing.T) {
 			}
 		}
 	}()
+	return <-mounted, c, mount.Root
+}
 
-	sc := <-mounted
-	onSession := func(fn func()) {
-		done := make(chan struct{})
-		sc.s.Update(func() { fn(); close(done) })
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-			t.Fatal("session never ran the update")
-		}
-	}
-	shown := func() (v string) {
-		onSession(func() { v, _ = sc.win.composer.Prop("value").(string) })
-		return v
-	}
-	seq := 0
-	typeText := func(text string) {
-		seq++
-		if err := c.WriteJSON(map[string]any{"t": "ev", "id": composer.ID, "ev": "input", "value": text, "seq": seq}); err != nil {
-			t.Fatal(err)
-		}
-		for deadline := time.Now().Add(3 * time.Second); shown() != text; time.Sleep(5 * time.Millisecond) {
-			if time.Now().After(deadline) {
-				t.Fatalf("the session never saw %q typed", text)
-			}
-		}
-	}
-	open := func(id string) { onSession(func() { sc.win.open(id) }) }
-
-	open("C1")
-	typeText("half a thought")
-	open("C2")
-	if v := shown(); v != "" {
-		t.Fatalf("C2's composer shows %q, want it empty", v)
-	}
-	typeText("for engineering")
-	open("C1")
-	if v := shown(); v != "half a thought" {
-		t.Fatalf("back in C1 the composer shows %q, want its draft", v)
-	}
-	open("C2")
-	if v := shown(); v != "for engineering" {
-		t.Fatalf("back in C2 the composer shows %q, want its draft", v)
+func runOnSession(t *testing.T, sc *screen, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	sc.s.Update(func() { fn(); close(done) })
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("session never ran the update")
 	}
 }
 

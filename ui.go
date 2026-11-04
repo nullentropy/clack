@@ -87,11 +87,13 @@ type window struct {
 	threadLog      *logView
 	threadComposer *caution.Node
 
-	overlay    *caution.Node
-	fitOverlay func(width, height float64) // resizes the overlay with the window, when it should
-	mentions   map[string]string
-	dropHint   *caution.Node // shown while files are dragged over the window
-	threadW    float64       // the thread pane's width
+	overlay     *caution.Node
+	fitOverlay  func(width, height float64) // resizes the overlay with the window, when it should
+	mentions    map[string]string
+	dropHint    *caution.Node // shown while files are dragged over the window
+	toasts      *caution.Node
+	toastCorner string
+	threadW     float64 // the thread pane's width
 }
 
 // newWindow makes sc's view of store

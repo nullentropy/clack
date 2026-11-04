@@ -20,6 +20,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/nullentropy/caution v0.26.0 h1:AeHjNOaCAST/oY+CDdpBH/C6Ldssp8q96lU82smgatM=
 github.com/nullentropy/caution v0.26.0/go.mod h1:1Hz2piyBEvHRd/YXX4mNp4qfE1s1Pqv4caxvMJCoEQY=
+github.com/nullentropy/caution v0.27.0 h1:smFKGUfRlakpZgcjbS9d+sc/ebrZYTGZa4aovweUkWg=
+github.com/nullentropy/caution v0.27.0/go.mod h1:1Hz2piyBEvHRd/YXX4mNp4qfE1s1Pqv4caxvMJCoEQY=
 github.com/rs/zerolog v1.35.1 h1:m7xQeoiLIiV0BCEY4Hs+j2NG4Gp2o2KPKmhnnLiazKI=
 github.com/rs/zerolog v1.35.1/go.mod h1:EjML9kdfa/RMA7h/6z6pYmq1ykOuA8/mjWaEvGI+jcw=
 github.com/slack-go/slack v0.32.0 h1:N9zo22Hoz5Hx+rXwtRZSdkJP/3FrQ24eBGSf3A5S3EE=
