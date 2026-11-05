@@ -222,6 +222,11 @@ func (w *window) deliverChanges() {
 
 func (w *window) changed(c chat.Change) {
 	w.renderTitle()
+	if c.User != "" {
+		w.timeline.restyle(c.User)
+		w.threadLog.restyle(c.User)
+		w.renderHeader()
+	}
 	if c.Channel == "" {
 		w.renderStatus()
 	}
@@ -580,6 +585,23 @@ func (w *window) channelLabel(c chat.Channel) string {
 	return "#" + c.Name
 }
 
+// presenceLine says whether a user is away and what status they set, "" for neither
+func (w *window) presenceLine(id string) string {
+	if id == "" {
+		return ""
+	}
+	var parts []string
+	if w.store.UserAway(id) {
+		parts = append(parts, "away")
+	}
+	if u, ok := w.store.User(id); ok {
+		if s := u.StatusLine(time.Now()); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
 func (w *window) userName(id string) string {
 	if u, ok := w.store.User(id); ok {
 		return u.Display()
@@ -610,6 +632,9 @@ func (w *window) renderHeader() {
 		w.subtitle = kindLabel[c.Kind]
 		if c.Topic != "" {
 			w.subtitle = chat.Plain(c.Topic, w.userName, w.channelName)
+		}
+		if p := w.presenceLine(c.Peer); c.Kind == chat.Direct && p != "" {
+			w.subtitle = p
 		}
 	}
 	w.renderStatus()
@@ -722,6 +747,15 @@ func (v *logView) sync(key string, msgs []chat.Message, empty string) *caution.N
 	return v.add(msgs, 0)
 }
 
+// restyle redraws the rows a user wrote, after their presence or status changed
+func (v *logView) restyle(user string) {
+	for i, m := range v.shown {
+		if m.User == user {
+			v.slots[i].Clear().Kids(v.fill(v.shown, i)...)
+		}
+	}
+}
+
 func (v *logView) nickWidth(msgs []chat.Message) float64 {
 	longest := 0
 	for _, m := range msgs {
@@ -812,8 +846,16 @@ func (w *window) messageRow(m chat.Message, prev *chat.Message, nickW float64, r
 	}
 	nick := caution.Panel().W(nickW).H(lineHeight)
 	if !grouped {
-		nick.Kids(caution.Label(name).Mono().FontSize(fontSize).Weight(700).Color(nickColor(m.User + m.Username)).
-			Anchor(caution.A{Right: caution.Px(0), Top: caution.Px(0)}))
+		color := nickColor(m.User + m.Username)
+		if m.User != "" && w.store.UserAway(m.User) {
+			color = faded(color)
+		}
+		label := caution.Label(name).Mono().FontSize(fontSize).Weight(700).Color(color).
+			Anchor(caution.A{Right: caution.Px(0), Top: caution.Px(0)})
+		if tip := w.presenceLine(m.User); tip != "" {
+			label.Tip(w.nickName(m) + " · " + tip)
+		}
+		nick.Kids(label)
 	}
 
 	var lines []*caution.Node

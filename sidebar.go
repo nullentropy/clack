@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/nullentropy/caution"
+	"github.com/nullentropy/clack/chat"
 )
 
 type sideRow struct {
@@ -16,6 +17,8 @@ type sideRow struct {
 	unread  bool
 	mention bool // an unread message names the user
 	current bool
+	away    bool   // the person in a direct message is away
+	tip     string // shown on hover
 }
 
 type sidebar struct {
@@ -45,7 +48,7 @@ func newSidebar(team string, open func(id string)) *sidebar {
 
 func (sb *sidebar) render(rows []sideRow) {
 	sameKeys := slices.EqualFunc(rows, sb.shown, func(a, b sideRow) bool {
-		return a.key == b.key && a.num == b.num && a.label == b.label
+		return a.key == b.key && a.num == b.num && a.label == b.label && a.tip == b.tip
 	})
 	if !sameKeys {
 		sb.col.Clear()
@@ -80,11 +83,11 @@ func (sb *sidebar) add(r sideRow) sideNodes {
 			Anchor(caution.A{Left: caution.Px(12 + 3*monoAdvance), Right: caution.Px(8), CenterY: caution.Px(0)}),
 	}
 	key := r.key
-	n.row = sb.col.Add(caution.Panel().H(lineHeight+2).Kids(
-		n.num,
-		n.label,
-		caution.Glass().Anchor(fill).OnPick(func(float64, float64, *caution.Node) { sb.open(key) }),
-	))
+	glass := caution.Glass().Anchor(fill).OnPick(func(float64, float64, *caution.Node) { sb.open(key) })
+	if r.tip != "" {
+		glass.Tip(r.tip)
+	}
+	n.row = sb.col.Add(caution.Panel().H(lineHeight+2).Kids(n.num, n.label, glass))
 	style(n, r)
 	return n
 }
@@ -99,6 +102,9 @@ func style(n sideNodes, r sideRow) {
 	}
 	if r.mention {
 		weight, color = 700, "$highlight"
+	}
+	if r.away {
+		color = faded(color)
 	}
 	if r.current {
 		color, numColor, bg = "$ink", "$ink", "$accent"
@@ -120,6 +126,10 @@ func (w *window) sidebarRows() []sideRow {
 			unread:  w.store.Unread(c.ID) > 0 || w.store.NewReplies(c.ID) > 0,
 			mention: w.store.UnreadMentions(c.ID) > 0,
 			current: c.ID == w.active,
+		}
+		if c.Kind == chat.Direct {
+			r.away = w.store.UserAway(c.Peer)
+			r.tip = w.presenceLine(c.Peer)
 		}
 		if c.Kind.IsDM() {
 			dms = append(dms, r)

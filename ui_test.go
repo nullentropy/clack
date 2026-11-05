@@ -217,3 +217,35 @@ func TestAStuckWindowDoesNotHoldUpSlackEvents(t *testing.T) {
 		t.Fatal("events stopped being applied while the window was stuck")
 	}
 }
+
+func TestAwayNicksFadeAndShowStatusOnHover(t *testing.T) {
+	sc, _, _ := mountTestWindow(t)
+	sc.win.store.Apply(chat.PresenceChanged{User: "U2", Away: true})
+	nick := func(name string) (color, tip any) {
+		runOnSession(t, sc, func() {
+			var walk func(n *caution.Node)
+			walk = func(n *caution.Node) {
+				if n.Prop("text") == name && n.Prop("weight") == 700 {
+					color, tip = n.Prop("color"), n.Prop("tip")
+				}
+				for _, k := range n.Children() {
+					walk(k)
+				}
+			}
+			walk(sc.win.timeline.col)
+		})
+		return
+	}
+	for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if c, _ := nick("Arthur Dent"); c == faded(nickColor("U2")) {
+			break
+		}
+		if time.Now().After(deadline) {
+			c, _ := nick("Arthur Dent")
+			t.Fatalf("Arthur is away but his nick is %v", c)
+		}
+	}
+	if c, tip := nick("Ford Prefect"); c != nickColor("U3") || tip != "Ford Prefect · :thumbsup: Hitching a ride" {
+		t.Fatalf("Ford's nick is %v with tip %v", c, tip)
+	}
+}

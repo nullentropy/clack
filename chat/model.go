@@ -31,10 +31,21 @@ type Channel struct {
 }
 
 type User struct {
-	ID       string
-	Name     string
-	RealName string
-	Avatar   string
+	ID          string
+	Name        string
+	RealName    string
+	Avatar      string
+	Status      string    // the status they set, "" for none
+	StatusEmoji string    // by slack name, ":palm_tree:"
+	StatusUntil time.Time // when slack clears the status, zero for never
+}
+
+// StatusLine is a user's status in one line
+func (u User) StatusLine(now time.Time) string {
+	if !u.StatusUntil.IsZero() && !now.Before(u.StatusUntil) {
+		return ""
+	}
+	return strings.TrimSpace(u.StatusEmoji + " " + u.Status)
 }
 
 // Display is the name shown on messages
@@ -170,6 +181,17 @@ type ChannelChanged struct {
 	Channel Channel
 }
 
+// UserChanged is a user's new profile, their status included
+type UserChanged struct {
+	User User
+}
+
+// PresenceChanged is whether a user is away
+type PresenceChanged struct {
+	User string
+	Away bool
+}
+
 type LinkState int
 
 const (
@@ -183,12 +205,14 @@ type Link struct {
 	Err   error
 }
 
-func (Posted) event()         {}
-func (Edited) event()         {}
-func (Deleted) event()        {}
-func (ChannelChanged) event() {}
-func (Reacted) event()        {}
-func (Link) event()           {}
+func (Posted) event()          {}
+func (Edited) event()          {}
+func (Deleted) event()         {}
+func (ChannelChanged) event()  {}
+func (Reacted) event()         {}
+func (Link) event()            {}
+func (UserChanged) event()     {}
+func (PresenceChanged) event() {}
 
 type Backend interface {
 	Bootstrap(ctx context.Context) (Snapshot, error)
@@ -210,6 +234,8 @@ type Backend interface {
 	SetTopic(ctx context.Context, channel, topic string) error
 	// SetAway sets the user away, or back to automatic presence
 	SetAway(ctx context.Context, away bool) error
+	// Presence reports whether another user is away
+	Presence(ctx context.Context, user string) (away bool, err error)
 	// Upload posts a file to the channel, or into a thread when thread is set
 	Upload(ctx context.Context, channel string, thread TS, name string, data []byte) error
 	// ReadCursor is where the user has read up to in the conversation in

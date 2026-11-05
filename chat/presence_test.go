@@ -78,3 +78,36 @@ func next(t *testing.T, presence chan bool) bool {
 		return false
 	}
 }
+
+func TestPresencePollMarksOpenDirectMessagePeersAway(t *testing.T) {
+	b := &fakeBackend{away: map[string]bool{"U1": true}}
+	s, changes := startStore(t, b)
+	s.SetOpen("D1", true)
+	s.checkPresence(context.Background())
+	if !s.UserAway("U1") {
+		t.Fatal("Zaphod's DM is open and he's away, but the store says present")
+	}
+	for {
+		select {
+		case c := <-changes:
+			if c.User == "U1" {
+				return
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no change for Zaphod's presence")
+		}
+	}
+}
+
+func TestUserChangedUpdatesStatusUntilItExpires(t *testing.T) {
+	s, _ := startStore(t, &fakeBackend{})
+	now := time.Now()
+	s.Apply(UserChanged{User: User{ID: "U3", RealName: "Ford Prefect", StatusEmoji: ":thumbsup:", Status: "Hitching a ride", StatusUntil: now.Add(time.Hour)}})
+	u, _ := s.User("U3")
+	if got := u.StatusLine(now); got != ":thumbsup: Hitching a ride" {
+		t.Fatalf("status line %q", got)
+	}
+	if got := u.StatusLine(now.Add(2 * time.Hour)); got != "" {
+		t.Fatalf("expired status still shows %q", got)
+	}
+}

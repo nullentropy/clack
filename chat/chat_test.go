@@ -55,7 +55,8 @@ type fakeBackend struct {
 
 	mu       sync.Mutex
 	marked   []TS
-	presence chan bool // each SetAway
+	presence chan bool       // each SetAway
+	away     map[string]bool // other users' presence
 	awayErr  error
 	send     func(text string) (TS, error) // nil posts straight away
 }
@@ -89,6 +90,12 @@ func (f *fakeBackend) SetAway(_ context.Context, away bool) error {
 		f.presence <- away
 	}
 	return f.awayErr
+}
+
+func (f *fakeBackend) Presence(_ context.Context, user string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.away[user], nil
 }
 
 func (f *fakeBackend) Mark(_ context.Context, _ string, ts TS) error {

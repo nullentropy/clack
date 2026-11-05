@@ -1,8 +1,11 @@
 package chat
 
 import (
+	"cmp"
 	"context"
 	"log"
+	"maps"
+	"slices"
 	"time"
 )
 
@@ -13,13 +16,14 @@ func (s *Store) SetAway(ctx context.Context, away bool) error {
 	s.mu.Lock()
 	was := s.away
 	s.away = away
+	self := Change{User: s.snap.Self}
 	s.mu.Unlock()
-	s.notify(Change{})
+	s.notify(self)
 	if err := s.backend.SetAway(ctx, away); err != nil {
 		s.mu.Lock()
 		s.away = was
 		s.mu.Unlock()
-		s.notify(Change{})
+		s.notify(self)
 		return err
 	}
 	return nil
@@ -77,4 +81,96 @@ func (s *Store) autoSet(away bool) {
 	if err := s.SetAway(context.Background(), away); err != nil {
 		log.Printf("presence: %v", err)
 	}
+}
+
+type presence struct {
+	away    bool
+	checked time.Time // zero until polled
+}
+
+// UserAway reports whether a user is away, as of the last poll
+func (s *Store) UserAway(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == s.snap.Self {
+		return s.away
+	}
+	return s.presence[id].away
+}
+
+// slack's Events API never sends presence so we poll
+// they allow about 50 calls a minute, we make 40
+const (
+	presenceEvery = 15 * time.Second
+	presenceBatch = 10
+)
+
+func (s *Store) pollPresence(ctx context.Context) {
+	tick := time.NewTicker(presenceEvery)
+	defer tick.Stop()
+	for {
+		s.checkPresence(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+// checkPresence asks slack about the watched users it checked longest ago
+func (s *Store) checkPresence(ctx context.Context) {
+	for _, id := range s.stalest(presenceBatch) {
+		away, err := s.backend.Presence(ctx, id)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			log.Printf("users.getPresence %s: %v", id, err)
+			continue
+		}
+		s.mu.Lock()
+		p := s.presence[id]
+		was, known := p.away, !p.checked.IsZero()
+		p.checked = time.Now()
+		s.presence[id] = p
+		s.mu.Unlock()
+		if !known || was != away {
+			s.Apply(PresenceChanged{User: id, Away: away})
+		}
+	}
+}
+
+func (s *Store) stalest(n int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := slices.Collect(maps.Keys(s.watchedLocked()))
+	slices.SortFunc(ids, func(a, b string) int {
+		return cmp.Or(s.presence[a].checked.Compare(s.presence[b].checked), cmp.Compare(a, b))
+	})
+	return ids[:min(n, len(ids))]
+}
+
+// watchedLocked is who the user can see: the people in their open direct
+// messages and the authors in the buffer they have open
+func (s *Store) watchedLocked() map[string]bool {
+	out := map[string]bool{}
+	for id, c := range s.channels {
+		if !s.open[id] {
+			continue
+		}
+		if c.Peer != "" {
+			out[c.Peer] = true
+		}
+		for _, m := range c.Members {
+			out[m] = true
+		}
+	}
+	for _, m := range s.timeline[s.last] {
+		if m.User != "" && !m.System {
+			out[m.User] = true
+		}
+	}
+	delete(out, s.snap.Self)
+	return out
 }

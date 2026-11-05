@@ -52,6 +52,20 @@ var themes = map[string]map[string]string{
 
 const defaultTheme = "dark"
 
+// every opaque color gets an Away variant, faded for people who are away
+func init() {
+	for _, t := range themes {
+		for k, v := range maps.Clone(t) {
+			if len(v) == len("#rrggbb") {
+				t[k+"Away"] = v + "8c"
+			}
+		}
+	}
+}
+
+// faded is a theme color as it's shown for someone away
+func faded(color string) string { return color + "Away" }
+
 func themeNames() []string { return slices.Sorted(maps.Keys(themes)) }
 
 func (a *app) theme() map[string]string {

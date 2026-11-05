@@ -28,8 +28,11 @@ var demoUsers = []User{
 	{ID: "U0", Name: "you", RealName: "You"},
 	{ID: "U1", Name: "zaphod", RealName: "Zaphod Beeblebrox"},
 	{ID: "U2", Name: "arthur", RealName: "Arthur Dent"},
-	{ID: "U3", Name: "ford", RealName: "Ford Prefect"},
+	{ID: "U3", Name: "ford", RealName: "Ford Prefect", StatusEmoji: ":thumbsup:", Status: "Hitching a ride"},
 }
+
+// demoAway is who the demo shows as away
+var demoAway = map[string]bool{"U2": true}
 
 var demoChannels = []Channel{
 	{ID: "C1", Name: "general", Kind: Public, Topic: "Ship-wide news. Bridge briefing is at 10:30."},
@@ -270,6 +273,8 @@ func (d *Demo) Search(_ context.Context, query string) ([]Hit, error) {
 }
 
 func (d *Demo) SetAway(context.Context, bool) error { return nil }
+
+func (d *Demo) Presence(_ context.Context, user string) (bool, error) { return demoAway[user], nil }
 
 func (d *Demo) Edit(_ context.Context, channel string, ts TS, text string) error {
 	d.mu.Lock()

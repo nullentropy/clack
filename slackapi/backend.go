@@ -61,11 +61,7 @@ func (b *Backend) Bootstrap(ctx context.Context) (chat.Snapshot, error) {
 		if u.Deleted {
 			continue
 		}
-		display := u.Profile.DisplayName
-		if display == "" {
-			display = u.RealName
-		}
-		users = append(users, chat.User{ID: u.ID, Name: u.Name, RealName: display, Avatar: u.Profile.Image72})
+		users = append(users, user(u))
 	}
 
 	var channels []chat.Channel
@@ -94,6 +90,25 @@ func (b *Backend) Bootstrap(ctx context.Context) (chat.Snapshot, error) {
 		log.Printf("users.getPresence: %v", err)
 	}
 	return snap, nil
+}
+
+func user(u slack.User) chat.User {
+	out := chat.User{
+		ID: u.ID, Name: u.Name, RealName: cmp.Or(u.Profile.DisplayName, u.RealName), Avatar: u.Profile.Image72,
+		Status: u.Profile.StatusText, StatusEmoji: u.Profile.StatusEmoji,
+	}
+	if u.Profile.StatusExpiration > 0 {
+		out.StatusUntil = time.Unix(int64(u.Profile.StatusExpiration), 0)
+	}
+	return out
+}
+
+// slackUser is the part of a user_change event's user that user reads
+func slackUser(u slackevents.User) slack.User {
+	return slack.User{ID: u.ID, Name: u.Name, RealName: u.RealName, Profile: slack.UserProfile{
+		DisplayName: u.Profile.DisplayName, Image72: u.Profile.Image72,
+		StatusText: u.Profile.StatusText, StatusEmoji: u.Profile.StatusEmoji, StatusExpiration: u.Profile.StatusExpiration,
+	}}
 }
 
 func (b *Backend) channel(c slack.Channel) chat.Channel {
@@ -454,6 +469,18 @@ func (b *Backend) SetAway(ctx context.Context, away bool) error {
 	return b.api.SetUserPresenceContext(ctx, presence)
 }
 
+func (b *Backend) Presence(ctx context.Context, user string) (bool, error) {
+	var p *slack.UserPresence
+	err := retry(ctx, func() (err error) {
+		p, err = b.api.GetUserPresenceContext(ctx, user)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	return p.Presence == "away", nil
+}
+
 func (b *Backend) Mark(ctx context.Context, channel string, ts chat.TS) error {
 	return retry(ctx, func() error { return b.api.MarkConversationContext(ctx, channel, string(ts)) })
 }
@@ -563,6 +590,10 @@ func (b *Backend) handle(client *socketmode.Client, ev socketmode.Event, emit fu
 			emit(chat.Reacted{Channel: r.Item.Channel, TS: chat.TS(r.Item.Timestamp), Name: r.Reaction, User: r.User})
 		case *slackevents.ReactionRemovedEvent:
 			emit(chat.Reacted{Channel: r.Item.Channel, TS: chat.TS(r.Item.Timestamp), Name: r.Reaction, User: r.User, Removed: true})
+		case *slackevents.UserChangeEvent:
+			if !r.User.Deleted {
+				emit(chat.UserChanged{User: user(slackUser(r.User))})
+			}
 		}
 		if m, ok := api.InnerEvent.Data.(*slackevents.MessageEvent); ok {
 			if e := b.messageEvent(m); e != nil {

@@ -20,8 +20,10 @@ import (
 
 // Change is slack telling us that something in the workspace happened
 // Channel will be empty for things that aren't about a specific channel
+// User is set when a user's presence or status changed
 type Change struct {
 	Channel string
+	User    string
 }
 
 // Store is the workspace state in process
@@ -53,10 +55,11 @@ type Store struct {
 	link         Link
 	markErr      string // see MarkProblem
 	away         bool
-	autoAway     time.Duration // idle time before going away; zero is never
-	autoBack     bool          // typing while away comes back
-	idle         *time.Timer   // fires after autoAway without Activity
-	stopped      bool          // ctx ended, so no more automatic presence
+	presence     map[string]presence // other users, as last polled
+	autoAway     time.Duration       // idle time before going away; zero is never
+	autoBack     bool                // typing while away comes back
+	idle         *time.Timer         // fires after autoAway without Activity
+	stopped      bool                // ctx ended, so no more automatic presence
 	subs         map[int]func(Change)
 	nextSub      int
 	alert        func(Alert) // see OnAlert
@@ -123,6 +126,7 @@ func NewStore(b Backend, stateDir string) *Store {
 		mine:     map[threadKey]bool{},
 		newIn:    map[threadKey]int{},
 		subs:     map[int]func(Change){},
+		presence: map[string]presence{},
 	}
 }
 
@@ -155,6 +159,7 @@ func (s *Store) Start(ctx context.Context) error {
 	s.resetIdleLocked()
 	s.mu.Unlock()
 	go s.readCursors(ctx)
+	go s.pollPresence(ctx)
 	go func() {
 		<-ctx.Done()
 		s.mu.Lock()
@@ -457,6 +462,14 @@ func (s *Store) Apply(ev Event) {
 		if _, ok := s.channels[e.Channel.ID]; ok {
 			s.channels[e.Channel.ID] = e.Channel
 		}
+	case UserChanged:
+		ch.User = e.User.ID
+		s.users[e.User.ID] = e.User
+	case PresenceChanged:
+		ch.User = e.User
+		p := s.presence[e.User]
+		p.away = e.Away
+		s.presence[e.User] = p
 	case Link:
 		s.link = e
 	}
