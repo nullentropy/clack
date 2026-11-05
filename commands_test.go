@@ -433,3 +433,40 @@ func TestSwitcherArrowsMoveTheHighlightAndEnterOpensIt(t *testing.T) {
 		t.Fatalf("after typing, Enter opened %q, want the first match", opened)
 	}
 }
+
+func TestMuteHidesSomeoneInTheOpenChannel(t *testing.T) {
+	store := chat.NewStore(&chat.Demo{}, t.TempDir())
+	changed := make(chan struct{}, 8)
+	store.Subscribe(func(chat.Change) { changed <- struct{}{} })
+	if err := store.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-changed
+	store.Load(context.Background(), "C1")
+	<-changed
+	w := &window{store: store, active: "C1", app: &app{dir: t.TempDir()},
+		status: caution.Label(""), timeline: testLog()}
+	w.renderTimeline()
+	fromFord := func(m chat.Message) bool { return m.User == "U3" }
+	if !slices.ContainsFunc(w.timeline.shown, fromFord) {
+		t.Fatal("#general has nothing from Ford to mute")
+	}
+
+	w.command(target{channel: "C1"}, "/mute @Ford Prefect")
+	if slices.ContainsFunc(w.timeline.shown, fromFord) {
+		t.Error("Ford still shows in #general after /mute")
+	}
+	if store.Muted("C2", "U3") {
+		t.Error("/mute without -a muted Ford in #engineering too")
+	}
+
+	w.command(target{channel: "D2"}, "/mute ford")
+	if store.Muted("D2", "U3") {
+		t.Error("/mute in a DM muted Ford there")
+	}
+
+	w.command(target{channel: "C1"}, "/unmute ford")
+	if !slices.ContainsFunc(w.timeline.shown, fromFord) {
+		t.Error("Ford is still hidden in #general after /unmute")
+	}
+}

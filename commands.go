@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -27,6 +28,10 @@ const helpText = `COMMANDS
   /who, /names           list members in the status buffer
   /search terms, /s      Slack search, hits in the status buffer
   /react +1, /r          react to the newest message
+  /mute name             hide someone's messages in this channel
+  /mute -a name          hide them in every channel
+  /unmute name, -a       show them here again, or unmute everywhere
+  /mute                  list who's muted
   /close                 close the open thread
   /clear                 hide scrollback until relaunch
   //text                 send a message starting with /
@@ -111,6 +116,10 @@ func (w *window) command(to target, text string) bool {
 		w.autoAway(arg)
 	case "autoback":
 		w.autoBack(arg)
+	case "mute":
+		w.mute(to.channel, arg, true)
+	case "unmute":
+		w.mute(to.channel, arg, false)
 	case "close":
 		w.closeThread()
 	case "settings", "tokens":
@@ -562,4 +571,82 @@ func (w *window) substitute(to target, sb subst) {
 			w.s.Update(func() { w.notice("edit failed: " + err.Error()) })
 		}
 	}()
+}
+
+func (w *window) mute(channel, arg string, on bool) {
+	var words []string
+	scope := channel
+	for _, f := range strings.Fields(arg) {
+		if f == "-a" {
+			scope = chat.Everywhere
+		} else {
+			words = append(words, f)
+		}
+	}
+	verb := map[bool]string{true: "mute", false: "unmute"}[on]
+	name := strings.TrimPrefix(strings.Join(words, " "), "@")
+	if name == "" {
+		if on && scope == channel {
+			w.listMutes()
+		} else {
+			w.notice(fmt.Sprintf("usage: /%s name, or /%s -a name for every channel", verb, verb))
+		}
+		return
+	}
+	user, ok := w.findUser(name)
+	if !ok {
+		w.notice("no one called " + name)
+		return
+	}
+	if user == w.store.Self() {
+		w.notice("you can't " + verb + " yourself")
+		return
+	}
+	where := "everywhere except DMs"
+	if scope != chat.Everywhere {
+		c, ok := w.store.Channel(channel)
+		if !ok || c.Kind.IsDM() {
+			w.notice(fmt.Sprintf("/%s works in a channel - /%s -a %s for every channel", verb, verb, name))
+			return
+		}
+		where = "in " + w.channelLabel(c)
+	}
+	who := w.userName(user)
+	if on {
+		w.store.Mute(user, scope)
+		w.notice(fmt.Sprintf("muted %s %s · /unmute %s", who, where, strings.TrimSpace(map[bool]string{true: "-a "}[scope == chat.Everywhere]+name)))
+	} else {
+		w.store.Unmute(user, scope)
+		if scope != chat.Everywhere && w.store.Muted(channel, user) {
+			w.notice(fmt.Sprintf("%s is still muted in every channel · /unmute -a %s", who, name))
+		} else {
+			w.notice(fmt.Sprintf("unmuted %s %s", who, where))
+		}
+	}
+	if w.thread.channel != "" {
+		w.renderThread()
+	}
+}
+
+func (w *window) listMutes() {
+	mutes := w.store.Mutes()
+	if len(mutes) == 0 {
+		w.notice("no one is muted · /mute name")
+		return
+	}
+	var lines []string
+	for _, user := range slices.Sorted(maps.Keys(mutes)) {
+		var where []string
+		for _, id := range mutes[user] {
+			if id == chat.Everywhere {
+				where = append(where, "everywhere except DMs")
+			} else if c, ok := w.store.Channel(id); ok {
+				where = append(where, w.channelLabel(c))
+			} else {
+				where = append(where, id)
+			}
+		}
+		lines = append(lines, w.userName(user)+": "+strings.Join(where, ", "))
+	}
+	w.notice("muted · " + strings.Join(lines, " · "))
 }

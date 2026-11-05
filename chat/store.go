@@ -41,11 +41,12 @@ type Store struct {
 	// seen is the newest message the user has viewed in each channel, for
 	// slack's read cursor
 	seen         map[string]TS
-	marking      map[string]bool    // channels with a Mark call in flight
-	mine         map[threadKey]bool // threads the user posted in
-	newIn        map[threadKey]int  // unread replies in the user's threads
-	open         map[string]bool    // conversations the user chose to show
-	last         string             // the buffer the user last had open
+	marking      map[string]bool            // channels with a Mark call in flight
+	mine         map[threadKey]bool         // threads the user posted in
+	newIn        map[threadKey]int          // unread replies in the user's threads
+	open         map[string]bool            // conversations the user chose to show
+	muted        map[string]map[string]bool // channels each user is muted in
+	last         string                     // the buffer the user last had open
 	mentions     []Mention
 	seenMentions int             // how many of mentions the user has seen in the status buffer
 	files        map[string]File // every attachment seen, by ID
@@ -59,8 +60,8 @@ type Store struct {
 	subs         map[int]func(Change)
 	nextSub      int
 	alert        func(Alert) // see OnAlert
-	posted []msgKey
-	started TS
+	posted       []msgKey
+	started      TS
 }
 
 type msgKey struct {
@@ -110,6 +111,7 @@ func NewStore(b Backend, stateDir string) *Store {
 		backend:  b,
 		stateDir: stateDir,
 		open:     map[string]bool{},
+		muted:    map[string]map[string]bool{},
 		files:    map[string]File{},
 		timeline: map[string][]Message{},
 		loaded:   map[string]bool{},
@@ -213,8 +215,9 @@ func (s *Store) setReadCursor(channel string, ts TS) {
 }
 
 type savedState struct {
-	Open []string `json:"open"`
-	Last string   `json:"last,omitempty"`
+	Open  []string            `json:"open"`
+	Last  string              `json:"last,omitempty"`
+	Muted map[string][]string `json:"muted,omitempty"` // user to channels
 }
 
 func (s *Store) statePath() string {
@@ -246,6 +249,11 @@ func (s *Store) loadState() error {
 		s.open[id] = true
 	}
 	s.last = st.Last
+	for user, channels := range st.Muted {
+		for _, c := range channels {
+			s.mute(user, c)
+		}
+	}
 	return nil
 }
 
@@ -254,7 +262,7 @@ func (s *Store) saveLocked() {
 	if path == "" {
 		return
 	}
-	st := savedState{Open: slices.Sorted(maps.Keys(s.open)), Last: s.last}
+	st := savedState{Open: slices.Sorted(maps.Keys(s.open)), Last: s.last, Muted: s.mutesLocked()}
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err == nil {
 		err = os.MkdirAll(filepath.Dir(path), 0o700)
@@ -383,7 +391,7 @@ func (s *Store) Apply(ev Event) {
 			s.posted = s.posted[len(s.posted)-maxPosted:]
 		}
 		s.index(e.Msg)
-		fromOther := e.Msg.User != s.snap.Self && !e.Msg.System
+		fromOther := e.Msg.User != s.snap.Self && !e.Msg.System && !s.isMuted(e.Channel, e.Msg.User)
 		late := e.Msg.TS < s.started
 		c, known := s.channels[e.Channel]
 		if !known && !s.adding[e.Channel] {
@@ -411,7 +419,9 @@ func (s *Store) Apply(ev Event) {
 		}
 		if e.Msg.IsReply() && !late {
 			s.bumpReplies(e.Channel, e.Msg.ThreadTS)
-			s.countReply(e.Channel, e.Msg)
+			if !s.isMuted(e.Channel, e.Msg.User) {
+				s.countReply(e.Channel, e.Msg)
+			}
 		}
 		s.put(e.Channel, e.Msg)
 	case Edited:
@@ -648,7 +658,7 @@ func (s *Store) LoadThread(ctx context.Context, channel string, thread TS) {
 func (s *Store) Thread(channel string, thread TS) []Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Clone(s.threads[threadKey{channel, thread}])
+	return s.visible(channel, s.threads[threadKey{channel, thread}])
 }
 
 // index records the messages' attachments so File can find them
@@ -983,7 +993,7 @@ func (s *Store) Users() []User {
 func (s *Store) Timeline(channel string) ([]Message, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Clone(s.timeline[channel]), s.loaded[channel]
+	return s.visible(channel, s.timeline[channel]), s.loaded[channel]
 }
 
 // Unread counts other people's messages after the read cursor
@@ -992,7 +1002,7 @@ func (s *Store) Unread(channel string) int {
 	defer s.mu.Unlock()
 	n := 0
 	for _, m := range s.timeline[channel] {
-		if m.TS > s.lastRead[channel] && m.User != s.snap.Self && !m.System {
+		if m.TS > s.lastRead[channel] && m.User != s.snap.Self && !m.System && !s.isMuted(channel, m.User) {
 			n++
 		}
 	}
@@ -1012,7 +1022,7 @@ func (s *Store) UnreadMentions(channel string) int {
 	defer s.mu.Unlock()
 	n := 0
 	for _, m := range s.timeline[channel] {
-		if m.TS > s.lastRead[channel] && m.User != s.snap.Self && s.names(m.Text) {
+		if m.TS > s.lastRead[channel] && m.User != s.snap.Self && s.names(m.Text) && !s.isMuted(channel, m.User) {
 			n++
 		}
 	}
