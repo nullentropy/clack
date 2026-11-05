@@ -2,11 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"image/png"
+	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/nullentropy/clack/chat"
 
 	"golang.org/x/image/webp"
 )
@@ -74,4 +81,48 @@ func displayable(data []byte) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("Slack sent %s instead of an image", ct)
 	}
+}
+
+// saveFile downloads an attachment's original into dir
+func saveFile(ctx context.Context, store *chat.Store, id, dir string) (string, error) {
+	f, ok := store.File(id)
+	if !ok {
+		return "", fmt.Errorf("no file %s", id)
+	}
+	name := filepath.Base(f.Name)
+	if name == "." || name == ".." || name == string(filepath.Separator) {
+		name = f.ID
+	}
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for n := 0; ; n++ {
+		path := filepath.Join(dir, name)
+		if n > 0 {
+			path = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, n, ext))
+		}
+		out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		err = store.Download(ctx, id, true, out)
+		if cerr := out.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			os.Remove(path)
+			return "", err
+		}
+		return path, nil
+	}
+}
+
+func downloadsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "Downloads"), nil
 }

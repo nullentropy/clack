@@ -398,7 +398,32 @@ func (w *window) spanClick(action string) {
 		}
 		w.store.SetOpen(ref, true)
 		w.open(ref)
+	case "file":
+		w.download(ref)
 	}
+}
+
+func (w *window) download(id string) {
+	f, ok := w.store.File(id)
+	if !ok {
+		return
+	}
+	dir, err := downloadsDir()
+	if err != nil {
+		w.notice("couldn't find your Downloads folder: " + err.Error())
+		return
+	}
+	w.notice(fmt.Sprintf("downloading %s (%s)…", f.Name, byteSize(f.Size)))
+	go func() {
+		path, err := saveFile(context.Background(), w.store, id, dir)
+		w.s.Update(func() {
+			if err != nil {
+				w.notice(fmt.Sprintf("couldn't download %s: %v", f.Name, err))
+				return
+			}
+			w.notice("saved " + path)
+		})
+	}()
 }
 
 func (w *window) linkLine(u string) *caution.Node {
@@ -927,8 +952,11 @@ func (w *window) attachment(f chat.File, maxW float64) *caution.Node {
 			Mono().FontSize(fontSize).Color("$inkDim").Wrap().Selectable()
 	}
 	if !f.IsImage() || f.ThumbW <= 0 || f.ThumbH <= 0 {
-		return caution.Label(fmt.Sprintf("[%s · %s]", f.Name, byteSize(f.Size))).
-			Mono().FontSize(fontSize).Color("$inkDim").Selectable()
+		return w.richText([]caution.Span{
+			{Text: "[", Mono: true},
+			{Text: "↓ " + f.Name, Mono: true, Color: "$link", Action: "file:" + f.ID},
+			{Text: " · " + byteSize(f.Size) + "]", Mono: true},
+		}, "$inkDim")
 	}
 	scale := min(1, maxW/float64(f.ThumbW), imageH/float64(f.ThumbH))
 	pw, ph := float64(f.ThumbW)*scale, float64(f.ThumbH)*scale
