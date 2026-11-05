@@ -26,7 +26,12 @@ func main() {
 	debug := flag.Bool("debug", false, "log each live event from Slack")
 	flag.Parse()
 
-	a := &app{dir: *dir, quit: func() { os.Exit(0) }, debug: *debug}
+	a := &app{dir: *dir, debug: *debug}
+	win := &windowSaver{a: a}
+	a.quit = func() {
+		win.flush()
+		os.Exit(0)
+	}
 	if *demo {
 		store := chat.NewStore(&chat.Demo{Chatter: *chatter}, *dir)
 		ctx, stop := context.WithCancel(context.Background())
@@ -42,7 +47,17 @@ func main() {
 	serveFonts()
 	caution.ServeClient()
 	if *nativeFlag || native.InBundle() {
-		if err := native.Run(a.mount, native.Options{Title: "clack", W: 1180, H: 780, MaxFPS: animationFPS}); err != nil {
+		saved, err := loadSettings(a.settingsPath())
+		if err != nil {
+			log.Printf("settings: %v", err)
+		}
+		w, h := windowSize(saved)
+		err = native.Run(a.mount, native.Options{
+			Title: "clack", W: w, H: h, Maximized: saved.Maximized,
+			OnWindow: win.note, MaxFPS: animationFPS,
+		})
+		win.flush()
+		if err != nil {
 			log.Fatal(err)
 		}
 		return

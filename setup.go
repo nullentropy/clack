@@ -47,6 +47,9 @@ type settings struct {
 	FXPing      bool   `json:"fx_ping,omitempty"`    // glitch the window when a DM or mention arrives
 	FXShimmer   bool   `json:"fx_shimmer,omitempty"` // color sweeps through messages that mention the user
 	FXSidebar   bool   `json:"fx_sidebar,omitempty"` // animated sidebar background
+	WindowW     int    `json:"window_w,omitempty"`   // restored window size in logical px
+	WindowH     int    `json:"window_h,omitempty"`
+	Maximized   bool   `json:"maximized,omitempty"`
 }
 
 func loadSettings(path string) (settings, error) {
