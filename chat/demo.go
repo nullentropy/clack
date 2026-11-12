@@ -231,6 +231,8 @@ func (d *Demo) OpenDM(_ context.Context, user string) (Channel, error) {
 
 func (d *Demo) Mark(context.Context, string, TS) error { return nil }
 
+func (d *Demo) MarkThread(context.Context, string, TS, TS) error { return nil }
+
 func (d *Demo) React(_ context.Context, channel string, ts TS, name string) error {
 	d.mu.Lock()
 	emit := d.emit

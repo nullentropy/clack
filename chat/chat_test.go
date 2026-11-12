@@ -53,12 +53,13 @@ type fakeBackend struct {
 	info    map[string]Channel // channels Info, Join and OpenDM can find
 	cursors map[string]TS      // slack's read cursor by channel
 
-	mu       sync.Mutex
-	marked   []TS
-	presence chan bool       // each SetAway
-	away     map[string]bool // other users' presence
-	awayErr  error
-	send     func(text string) (TS, error) // nil posts straight away
+	mu          sync.Mutex
+	marked      []TS
+	threadMarks []TS            // the reply each MarkThread call read up to
+	presence    chan bool       // each SetAway
+	away        map[string]bool // other users' presence
+	awayErr     error
+	send        func(text string) (TS, error) // nil posts straight away
 }
 
 func (f *fakeBackend) Send(_ context.Context, _ string, _ TS, text string) (TS, error) {
@@ -102,6 +103,13 @@ func (f *fakeBackend) Mark(_ context.Context, _ string, ts TS) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.marked = append(f.marked, ts)
+	return nil
+}
+
+func (f *fakeBackend) MarkThread(_ context.Context, _ string, _, ts TS) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.threadMarks = append(f.threadMarks, ts)
 	return nil
 }
 
@@ -670,6 +678,37 @@ func TestPingsCountWhatWouldNotify(t *testing.T) {
 	s.MarkThreadRead("C1", parent)
 	if n := s.Pings(); n != 0 {
 		t.Fatalf("after reading both, pings = %d", n)
+	}
+}
+
+func TestReadingAThreadMarksItReadInSlack(t *testing.T) {
+	at := func(sec int) TS { return TSFromTime(time.Now().Add(time.Duration(sec) * time.Second)) }
+	parent, first, last := at(-3), at(-2), at(-1)
+	b := &fakeBackend{replies: []Message{
+		{TS: parent, User: "U1", Text: "who has the towel?"},
+		{TS: first, User: "U2", ThreadTS: parent, Text: "Ford does"},
+		{TS: last, User: "U3", ThreadTS: parent, Text: "he always knows where it is"},
+	}}
+	s, changes := startStore(t, b)
+	s.LoadThread(context.Background(), "C1", parent)
+	<-changes
+	s.MarkThreadRead("C1", parent)
+	s.MarkThreadRead("C1", parent)
+	deadline := time.Now().Add(time.Second)
+	for {
+		b.mu.Lock()
+		marks := slices.Clone(b.threadMarks)
+		b.mu.Unlock()
+		if len(marks) > 0 {
+			if !slices.Equal(marks, []TS{last}) {
+				t.Fatalf("thread marks = %v, want one at %s", marks, last)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Slack was never told the thread was read")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

@@ -44,6 +44,7 @@ type Store struct {
 	// slack's read cursor
 	seen         map[string]TS
 	marking      map[string]bool            // channels with a Mark call in flight
+	threadSeen   map[threadKey]TS           // the newest reply slack has been told the user read
 	mine         map[threadKey]bool         // threads the user posted in
 	newIn        map[threadKey]int          // unread replies in the user's threads
 	open         map[string]bool            // conversations the user chose to show
@@ -111,22 +112,23 @@ func trim(msgs []Message) []Message {
 // NewStore makes a store over b that keeps the user's open list in stateDir
 func NewStore(b Backend, stateDir string) *Store {
 	return &Store{
-		backend:  b,
-		stateDir: stateDir,
-		open:     map[string]bool{},
-		muted:    map[string]map[string]bool{},
-		files:    map[string]File{},
-		timeline: map[string][]Message{},
-		loaded:   map[string]bool{},
-		threads:  map[threadKey][]Message{},
-		adding:   map[string]bool{},
-		lastRead: map[string]TS{},
-		seen:     map[string]TS{},
-		marking:  map[string]bool{},
-		mine:     map[threadKey]bool{},
-		newIn:    map[threadKey]int{},
-		subs:     map[int]func(Change){},
-		presence: map[string]presence{},
+		backend:    b,
+		stateDir:   stateDir,
+		open:       map[string]bool{},
+		muted:      map[string]map[string]bool{},
+		files:      map[string]File{},
+		timeline:   map[string][]Message{},
+		loaded:     map[string]bool{},
+		threads:    map[threadKey][]Message{},
+		adding:     map[string]bool{},
+		lastRead:   map[string]TS{},
+		seen:       map[string]TS{},
+		marking:    map[string]bool{},
+		threadSeen: map[threadKey]TS{},
+		mine:       map[threadKey]bool{},
+		newIn:      map[threadKey]int{},
+		subs:       map[int]func(Change){},
+		presence:   map[string]presence{},
 	}
 }
 

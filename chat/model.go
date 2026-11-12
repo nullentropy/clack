@@ -251,6 +251,8 @@ type Backend interface {
 	Download(ctx context.Context, url string, w io.Writer) error
 	// Mark moves the user's read cursor in the channel to ts
 	Mark(ctx context.Context, channel string, ts TS) error
+	// MarkThread moves the user's read cursor in a thread to the reply at ts
+	MarkThread(ctx context.Context, channel string, thread, ts TS) error
 	// Listen blocks, reporting live events until ctx ends
 	Listen(ctx context.Context, emit func(Event)) error
 }

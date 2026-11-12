@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/nullentropy/clack/chat"
@@ -216,5 +218,34 @@ func TestOnlySlackGetsTheToken(t *testing.T) {
 		if slackHosted(u) != want {
 			t.Errorf("slackHosted(%q) = %v, want %v", u, !want, want)
 		}
+	}
+}
+
+func TestMarkThreadSendsTheReplyReadUpTo(t *testing.T) {
+	var got url.Values
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/subscriptions.thread.mark" {
+			http.NotFound(w, r)
+			return
+		}
+		r.ParseForm()
+		got, auth = r.PostForm, r.Header.Get("Authorization")
+		if got.Get("channel") == "C404" {
+			fmt.Fprint(w, `{"ok": false, "error": "channel_not_found"}`)
+			return
+		}
+		fmt.Fprint(w, `{"ok": true}`)
+	}))
+	defer srv.Close()
+	b := &Backend{token: "xoxp-x", apiURL: srv.URL + "/"}
+	if err := b.MarkThread(context.Background(), "C1", "1.0", "3.0"); err != nil {
+		t.Fatal(err)
+	}
+	if auth != "Bearer xoxp-x" || got.Get("thread_ts") != "1.0" || got.Get("ts") != "3.0" || got.Get("read") != "1" {
+		t.Fatalf("sent %v with %q", got, auth)
+	}
+	if err := b.MarkThread(context.Background(), "C404", "1.0", "3.0"); err == nil || !strings.Contains(err.Error(), "channel_not_found") {
+		t.Fatalf("err = %v, want Slack's refusal", err)
 	}
 }

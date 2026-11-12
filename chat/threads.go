@@ -1,6 +1,10 @@
 package chat
 
-import "slices"
+import (
+	"context"
+	"log"
+	"slices"
+)
 
 func (s *Store) countReply(channel string, m Message) {
 	k := threadKey{channel, m.ThreadTS}
@@ -60,12 +64,31 @@ func (s *Store) NewReplies(channel string) int {
 func (s *Store) MarkThreadRead(channel string, thread TS) {
 	k := threadKey{channel, thread}
 	s.mu.Lock()
-	if s.newIn[k] == 0 {
-		s.mu.Unlock()
-		return
+	var newest TS
+	for _, m := range slices.Backward(s.threads[k]) {
+		if !m.Pending {
+			newest = m.TS
+			break
+		}
 	}
-	delete(s.newIn, k)
-	s.setNewReplies(k)
+	push := newest > thread && newest > s.threadSeen[k]
+	if push {
+		s.threadSeen[k] = newest
+	}
+	cleared := s.newIn[k] != 0
+	if cleared {
+		delete(s.newIn, k)
+		s.setNewReplies(k)
+	}
 	s.mu.Unlock()
-	s.notify(Change{Channel: channel})
+	if push {
+		go func() {
+			if err := s.backend.MarkThread(context.Background(), channel, thread, newest); err != nil {
+				log.Printf("mark thread %s/%s read: %v", channel, thread, err)
+			}
+		}()
+	}
+	if cleared {
+		s.notify(Change{Channel: channel})
+	}
 }

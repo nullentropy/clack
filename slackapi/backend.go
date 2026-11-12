@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +29,8 @@ import (
 
 type Backend struct {
 	api     *slack.Client
+	token   string
+	apiURL  string
 	Debug   bool
 	self    string
 	handles map[string]string // user handle -> ID, to read group DM names
@@ -36,7 +40,7 @@ type Backend struct {
 }
 
 func New(userToken, appToken string) *Backend {
-	return &Backend{api: slack.New(userToken, slack.OptionAppLevelToken(appToken)), bots: map[string]string{}}
+	return &Backend{api: slack.New(userToken, slack.OptionAppLevelToken(appToken)), token: userToken, apiURL: slack.APIURL, bots: map[string]string{}}
 }
 
 func (b *Backend) Bootstrap(ctx context.Context) (chat.Snapshot, error) {
@@ -483,6 +487,34 @@ func (b *Backend) Presence(ctx context.Context, user string) (bool, error) {
 
 func (b *Backend) Mark(ctx context.Context, channel string, ts chat.TS) error {
 	return retry(ctx, func() error { return b.api.MarkConversationContext(ctx, channel, string(ts)) })
+}
+
+// MarkThread calls subscriptions.thread.mark, which slack doesn't document
+// but accepts from a user token
+func (b *Backend) MarkThread(ctx context.Context, channel string, thread, ts chat.TS) error {
+	form := url.Values{"channel": {channel}, "thread_ts": {string(thread)}, "ts": {string(ts)}, "read": {"1"}}
+	return retry(ctx, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.apiURL+"subscriptions.thread.mark", strings.NewReader(form.Encode()))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "Bearer "+b.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusTooManyRequests {
+			after, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
+			return &slack.RateLimitedError{RetryAfter: time.Duration(after) * time.Second}
+		}
+		var r slack.SlackResponse
+		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+			return fmt.Errorf("subscriptions.thread.mark: %s: %w", resp.Status, err)
+		}
+		return r.Err()
+	})
 }
 
 func (b *Backend) Download(ctx context.Context, url string, w io.Writer) error {
