@@ -30,7 +30,7 @@ type sidebar struct {
 }
 
 type sideNodes struct {
-	row, num, label *caution.Node
+	row, num, label, glass *caution.Node
 }
 
 func newSidebar(team string, open func(id string)) *sidebar {
@@ -48,7 +48,7 @@ func newSidebar(team string, open func(id string)) *sidebar {
 
 func (sb *sidebar) render(rows []sideRow) {
 	sameKeys := slices.EqualFunc(rows, sb.shown, func(a, b sideRow) bool {
-		return a.key == b.key && a.num == b.num && a.label == b.label && a.tip == b.tip
+		return a.key == b.key && a.num == b.num && a.label == b.label
 	})
 	if !sameKeys {
 		sb.col.Clear()
@@ -83,11 +83,8 @@ func (sb *sidebar) add(r sideRow) sideNodes {
 			Anchor(caution.A{Left: caution.Px(12 + 3*monoAdvance), Right: caution.Px(8), CenterY: caution.Px(0)}),
 	}
 	key := r.key
-	glass := caution.Glass().Anchor(fill).OnPick(func(float64, float64, *caution.Node) { sb.open(key) })
-	if r.tip != "" {
-		glass.Tip(r.tip)
-	}
-	n.row = sb.col.Add(caution.Panel().H(lineHeight+2).Kids(n.num, n.label, glass))
+	n.glass = caution.Glass().Anchor(fill).OnPick(func(float64, float64, *caution.Node) { sb.open(key) })
+	n.row = sb.col.Add(caution.Panel().H(lineHeight+2).Kids(n.num, n.label, n.glass))
 	style(n, r)
 	return n
 }
@@ -112,6 +109,9 @@ func style(n sideNodes, r sideRow) {
 	n.label.Weight(weight).Color(color)
 	n.num.Color(numColor)
 	n.row.Bg(bg)
+	if r.tip != "" || n.glass.Prop("tip") != nil {
+		n.glass.Tip(r.tip)
+	}
 }
 
 func (w *window) sidebarRows() []sideRow {
