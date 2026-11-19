@@ -143,12 +143,21 @@ type Hit struct {
 
 // Snapshot is what a backend knows at startup
 type Snapshot struct {
-	Team     string
-	TeamID   string
-	Self     string
-	Users    []User
-	Channels []Channel
-	Away     bool // the user set themselves away
+	Team              string
+	TeamID            string
+	Self              string
+	Users             []User
+	Channels          []Channel
+	Away              bool // the user set themselves away
+	Groups            []UserGroup
+	GroupsUnavailable bool
+}
+
+type UserGroup struct {
+	ID      string
+	Handle  string
+	Name    string
+	Members []string
 }
 
 // Event is a change a backend observed after startup

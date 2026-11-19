@@ -366,8 +366,30 @@ func (s *Store) UnseenMentions() bool {
 }
 
 func (s *Store) names(text string) bool {
-	self := s.snap.Self
-	return strings.Contains(text, "<@"+self+">") || strings.Contains(text, "<@"+self+"|")
+	refs := []string{"@" + s.snap.Self, "!here", "!channel", "!everyone"}
+	for _, g := range s.snap.Groups {
+		if slices.Contains(g.Members, s.snap.Self) {
+			refs = append(refs, "!subteam^"+g.ID)
+		}
+	}
+	for _, r := range refs {
+		if strings.Contains(text, "<"+r+">") || strings.Contains(text, "<"+r+"|") {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) Groups() []UserGroup {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.snap.Groups)
+}
+
+func (s *Store) GroupsUnavailable() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.snap.GroupsUnavailable
 }
 
 func (s *Store) Subscribe(fn func(Change)) (cancel func()) {

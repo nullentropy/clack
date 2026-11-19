@@ -89,8 +89,7 @@ type window struct {
 
 	overlay     *caution.Node
 	fitOverlay  func(width, height float64) // resizes the overlay with the window, when it should
-	mentions    map[string]string
-	dropHint    *caution.Node // shown while files are dragged over the window
+	dropHint    *caution.Node               // shown while files are dragged over the window
 	toasts      *caution.Node
 	toastCorner string
 	threadW     float64 // the thread pane's width
@@ -100,7 +99,7 @@ type window struct {
 func newWindow(sc *screen, store *chat.Store) *window {
 	s := sc.s
 	w := &window{s: s, store: store, changesKick: make(chan struct{}, 1), app: sc.a, quit: sc.a.quit, tokens: sc.askTokens, focused: sc.isFocused,
-		mentions: map[string]string{}, drafts: map[target]string{}}
+		drafts: map[target]string{}}
 	w.renderTitle()
 
 	w.sidebar = newSidebar(store.Team(), w.open)
@@ -111,22 +110,23 @@ func newWindow(sc *screen, store *chat.Store) *window {
 		return w.messageRow(m, prev, nickW, true)
 	})
 	w.timeline.self = store.Self()
-	w.composer = composerField("Message", w.drafted(w.composerKey), func(text string) { w.submit(w.composer, w.composerTarget(), text) })
-	w.composer.OnTab(w.onTab(w.composer, func() string { return w.active }))
 
 	header := headerBar(
 		caution.VStack().Gap(2).Anchor(caution.A{Left: caution.Px(20), Right: caution.Px(20), CenterY: caution.Px(0)}).
 			Kids(w.title, w.status),
 	)
+	body := caution.Panel().Kids(caution.Scroll().InsetBottom(8).StickBottom().Anchor(fill).Kids(w.timeline.col))
+	w.composer = w.mentionComposer("Message", body, func() string { return w.active }, w.drafted(w.composerKey),
+		func(text string) { w.submit(w.composer, w.composerTarget(), text) })
 	footer := caution.Panel().Dock("bottom").H(60).Kids(w.composer)
-	body := caution.Scroll().InsetBottom(8).StickBottom().Kids(w.timeline.col)
 
 	w.threadChannel = caution.Label("").FontSize(12).Color("$inkFaint")
 	w.threadLog = newLogView(threadNick, w.nickName, func(m chat.Message, prev *chat.Message, nickW float64) *caution.Node {
 		return w.messageRow(m, prev, nickW, false)
 	})
-	w.threadComposer = composerField("Reply", w.drafted(func() target { return w.thread }), func(text string) { w.submit(w.threadComposer, w.thread, text) })
-	w.threadComposer.OnTab(w.onTab(w.threadComposer, func() string { return w.thread.channel }))
+	threadBody := caution.Panel().Kids(caution.Scroll().InsetBottom(8).StickBottom().Anchor(fill).Kids(w.threadLog.col))
+	w.threadComposer = w.mentionComposer("Reply", threadBody, func() string { return w.thread.channel }, w.drafted(func() target { return w.thread }),
+		func(text string) { w.submit(w.threadComposer, w.thread, text) })
 	w.threadView = caution.Panel().Kids(caution.DockPanel().Anchor(fill).Kids(
 		headerBar(
 			caution.VStack().Gap(2).Anchor(caution.A{Left: caution.Px(16), CenterY: caution.Px(0)}).Kids(
@@ -135,7 +135,7 @@ func newWindow(sc *screen, store *chat.Store) *window {
 				OnClick(w.closeThread),
 		),
 		caution.Panel().Dock("bottom").H(60).Kids(w.threadComposer),
-		caution.Scroll().InsetBottom(8).StickBottom().Kids(w.threadLog.col),
+		threadBody,
 	), caution.Panel().W(1).Bg("$edge").Anchor(caution.A{Left: caution.Px(0), Top: caution.Px(0), Bottom: caution.Px(0)}))
 
 	w.content = caution.HSplit().SplitPinEnd().SplitPos(threadWidth).SplitMin(360, 300).
@@ -161,6 +161,9 @@ func newWindow(sc *screen, store *chat.Store) *window {
 		w.open(last)
 	} else {
 		w.open(statusKey)
+	}
+	if store.GroupsUnavailable() {
+		w.notice("user groups are off: add the usergroups:read scope to the slack app under App Manifest and reinstall it")
 	}
 	return w
 }
@@ -311,10 +314,14 @@ func (w *window) drafted(key func() target) func(string) {
 	}
 }
 
-func composerField(placeholder string, input, submit func(string)) *caution.Node {
-	return caution.TextField("").Placeholder(placeholder).
-		Anchor(caution.A{Left: caution.Px(16), Right: caution.Px(16), Top: caution.Px(8)}).
-		OnInput(input).OnSubmit(submit)
+func (w *window) mentionComposer(placeholder string, host *caution.Node, channel func() string, input, submit func(string)) *caution.Node {
+	field := caution.TextField("").Placeholder(placeholder).
+		Anchor(caution.A{Left: caution.Px(16), Right: caution.Px(16), Top: caution.Px(8)})
+	p := w.newMentionPopup(field, channel, host)
+	return field.OnInput(func(text string) { input(text); p.update(text) }).
+		OnSubmit(p.onSubmit(submit)).
+		OnNav(p.move).
+		OnTab(p.onTab(w.onTab(field, channel)))
 }
 
 func (w *window) reactionLine(rs []chat.Reaction) *caution.Node {
@@ -487,7 +494,7 @@ func (w *window) submit(field *caution.Node, to target, text string) {
 }
 
 func (w *window) post(to target, text string) {
-	text = linkMentions(text, w.mentions)
+	text = linkMentions(text, w.mentionables(to.channel))
 	go func() {
 		if err := w.store.Send(context.Background(), to.channel, to.thread, text); err != nil {
 			w.s.Update(func() { w.notice("send failed: " + err.Error()) })

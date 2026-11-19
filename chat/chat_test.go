@@ -74,6 +74,9 @@ func (f *fakeBackend) Bootstrap(context.Context) (Snapshot, error) {
 		{ID: "C1", Name: "general"},
 		{ID: "C2", Name: "random"},
 		{ID: "D1", Kind: Direct, Peer: "U1"},
+	}, Groups: []UserGroup{
+		{ID: "S1", Handle: "crew", Members: []string{"U1", "ME"}},
+		{ID: "S2", Handle: "mice", Members: []string{"U1"}},
 	}}, nil
 }
 func (f *fakeBackend) History(context.Context, string) ([]Message, error) { return f.history, nil }
@@ -544,6 +547,24 @@ func TestNewRepliesInTheUsersThreads(t *testing.T) {
 	<-changes
 	if parent(mine).NewReplies != 0 || s.NewReplies("C1") != 1 {
 		t.Fatalf("after reading mine: %d on it, %d in the channel; want 0, 1", parent(mine).NewReplies, s.NewReplies("C1"))
+	}
+}
+
+func TestBroadcastsAndMyGroupsMentionMe(t *testing.T) {
+	s, _ := startStore(t, &fakeBackend{})
+	cases := map[string]bool{
+		"<!here> deploy":               true,
+		"<!channel|channel> meeting":   true,
+		"<!everyone> lunch":            true,
+		"<!subteam^S1> standup":        true,
+		"<!subteam^S1|@crew> standup":  true,
+		"<!subteam^S2|@mice> question": false,
+		"here and channel, unlinked":   false,
+	}
+	for text, want := range cases {
+		if got := s.MentionsMe(Message{User: "U1", Text: text}); got != want {
+			t.Errorf("MentionsMe(%q) = %v, want %v", text, got, want)
+		}
 	}
 }
 

@@ -88,12 +88,32 @@ func (b *Backend) Bootstrap(ctx context.Context) (chat.Snapshot, error) {
 		params.Cursor = cursor
 	}
 	snap := chat.Snapshot{Team: auth.Team, TeamID: auth.TeamID, Self: auth.UserID, Users: users, Channels: channels}
+	snap.Groups, snap.GroupsUnavailable = b.groups(ctx)
 	if p, err := b.api.GetUserPresenceContext(ctx, auth.UserID); err == nil {
 		snap.Away = p.ManualAway
 	} else {
 		log.Printf("users.getPresence: %v", err)
 	}
 	return snap, nil
+}
+
+func (b *Backend) groups(ctx context.Context) ([]chat.UserGroup, bool) {
+	gs, err := b.api.GetUserGroupsContext(ctx, slack.GetUserGroupsOptionIncludeUsers(true))
+	if err != nil {
+		if strings.Contains(err.Error(), "missing_scope") {
+			return nil, true
+		}
+		log.Printf("usergroups.list: %v", err)
+		return nil, false
+	}
+	out := make([]chat.UserGroup, 0, len(gs))
+	for _, g := range gs {
+		if g.DateDelete != 0 {
+			continue
+		}
+		out = append(out, chat.UserGroup{ID: g.ID, Handle: g.Handle, Name: g.Name, Members: g.Users})
+	}
+	return out, false
 }
 
 func user(u slack.User) chat.User {

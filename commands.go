@@ -177,7 +177,7 @@ func (w *window) msg(arg string) {
 		w.notice("no channel or person called " + name)
 		return
 	}
-	text = linkMentions(text, w.mentions)
+	text = linkMentions(text, w.mentionables(""))
 	go func() {
 		c, err := w.store.OpenDM(context.Background(), u)
 		if err == nil {

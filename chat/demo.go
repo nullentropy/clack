@@ -24,6 +24,10 @@ type Demo struct {
 	start time.Time
 }
 
+var demoGroups = []UserGroup{
+	{ID: "S1", Handle: "crew", Name: "Heart of Gold crew", Members: []string{"U0", "U1", "U3"}},
+}
+
 var demoUsers = []User{
 	{ID: "U0", Name: "you", RealName: "You"},
 	{ID: "U1", Name: "zaphod", RealName: "Zaphod Beeblebrox"},
@@ -151,7 +155,7 @@ func (d *Demo) Bootstrap(context.Context) (Snapshot, error) {
 	d.mu.Lock()
 	d.start = time.Now()
 	d.mu.Unlock()
-	return Snapshot{Team: "Clack Demo", TeamID: "T0DEMO", Self: "U0", Users: demoUsers, Channels: demoChannels}, nil
+	return Snapshot{Team: "Clack Demo", TeamID: "T0DEMO", Self: "U0", Users: demoUsers, Channels: demoChannels, Groups: demoGroups}, nil
 }
 
 func (d *Demo) History(_ context.Context, channel string) ([]Message, error) {

@@ -29,6 +29,7 @@
         "reactions:read",
         "reactions:write",
         "search:read",
+        "usergroups:read",
         "users:read",
         "users:write"
       ]
