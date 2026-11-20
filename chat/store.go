@@ -106,7 +106,9 @@ func trim(msgs []Message) []Message {
 	if len(msgs) <= maxTimeline {
 		return msgs
 	}
-	return slices.Clone(msgs[len(msgs)-(maxTimeline-trimBy):])
+	cut := len(msgs) - (maxTimeline - trimBy)
+	kept := slices.DeleteFunc(slices.Clone(msgs[:cut]), func(m Message) bool { return m.NewReplies == 0 })
+	return append(kept, msgs[cut:]...)
 }
 
 // NewStore makes a store over b that keeps the user's open list in stateDir
@@ -461,6 +463,7 @@ func (s *Store) Apply(ev Event) {
 				if e.Msg.Reactions == nil {
 					e.Msg.Reactions = msgs[i].Reactions // an edit that doesn't say keeps them
 				}
+				e.Msg.NewReplies = msgs[i].NewReplies
 				msgs[i] = e.Msg
 			}
 			return msgs
@@ -681,6 +684,9 @@ func (s *Store) LoadThread(ctx context.Context, channel string, thread TS) {
 			s.threads[k] = merge(s.threads[k], msgs)
 			if slices.ContainsFunc(msgs, func(m Message) bool { return m.User == s.snap.Self }) {
 				s.mine[k] = true
+			}
+			if s.newIn[k] > 0 {
+				s.showParent(k)
 			}
 		}
 		subs := s.subscribers()

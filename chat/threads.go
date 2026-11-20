@@ -14,10 +14,26 @@ func (s *Store) countReply(channel string, m Message) {
 		delete(s.newIn, k)
 	case s.isMine(k):
 		s.newIn[k]++
+		s.showParent(k)
 	default:
 		return
 	}
 	s.setNewReplies(k)
+}
+
+func (s *Store) showParent(k threadKey) {
+	if _, ok := find(s.timeline[k.channel], k.ts); ok {
+		return
+	}
+	t, loaded := s.threads[k]
+	if !loaded {
+		go s.LoadThread(context.Background(), k.channel, k.ts)
+		return
+	}
+	if i, ok := find(t, k.ts); ok {
+		s.timeline[k.channel] = merge(s.timeline[k.channel], t[i:i+1])
+		s.setNewReplies(k)
+	}
 }
 
 func (s *Store) isMine(k threadKey) bool {

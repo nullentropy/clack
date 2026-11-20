@@ -550,6 +550,72 @@ func TestNewRepliesInTheUsersThreads(t *testing.T) {
 	}
 }
 
+func TestNewRepliesSurviveAnEditOfTheParent(t *testing.T) {
+	at := func(sec int) TS { return TSFromTime(time.Now().Add(time.Duration(sec) * time.Second)) }
+	s, changes := startStore(t, &fakeBackend{})
+	mine := at(1)
+	s.Apply(Posted{Channel: "C1", Msg: Message{TS: mine, User: "ME", Text: "my question"}})
+	<-changes
+	s.Apply(Posted{Channel: "C1", Msg: Message{TS: at(2), User: "U1", ThreadTS: mine, Text: "an answer"}})
+	<-changes
+	s.Apply(Edited{Channel: "C1", Msg: Message{TS: mine, User: "ME", ThreadTS: mine, Replies: 1, Text: "my question"}})
+	msgs, _ := s.Timeline("C1")
+	i, _ := find(msgs, mine)
+	if msgs[i].NewReplies != 1 || s.NewReplies("C1") != 1 {
+		t.Fatalf("after the parent changed: %d on it, %d in the channel; want 1, 1", msgs[i].NewReplies, s.NewReplies("C1"))
+	}
+}
+
+func TestNewRepliesBringBackAParentTooOldForTheTimeline(t *testing.T) {
+	n := 0
+	next := func() TS { n++; return TSFromTime(time.Now().Add(time.Second + time.Duration(n)*time.Millisecond)) }
+	mine, joined, answer := next(), next(), next()
+	b := &fakeBackend{replies: []Message{
+		{TS: mine, User: "U1", ThreadTS: mine, Text: "a question"},
+		{TS: joined, User: "ME", ThreadTS: mine, Text: "me too"},
+		{TS: answer, User: "U2", ThreadTS: mine, Text: "an answer"},
+	}}
+	s, changes := startStore(t, b)
+	post := func(m Message) { s.Apply(Posted{Channel: "C1", Msg: m}); <-changes }
+	flood := func() {
+		for range maxTimeline {
+			post(Message{TS: next(), User: "U2", Text: "chatter"})
+		}
+	}
+	parent := func() (Message, bool) {
+		msgs, _ := s.Timeline("C1")
+		i, ok := find(msgs, mine)
+		if !ok {
+			return Message{}, false
+		}
+		return msgs[i], true
+	}
+
+	post(Message{TS: mine, User: "U1", Text: "a question"})
+	post(Message{TS: joined, User: "ME", ThreadTS: mine, Text: "me too"})
+	flood()
+	if _, ok := parent(); ok {
+		t.Fatal("the parent should have been trimmed for this test")
+	}
+	post(Message{TS: answer, User: "U2", ThreadTS: mine, Text: "an answer"})
+	select {
+	case <-changes: // the thread loads
+	case <-time.After(time.Second):
+	}
+	if m, ok := parent(); !ok || m.NewReplies != 1 {
+		t.Fatalf("after a reply: parent shown %v with %d new, want shown with 1", ok, m.NewReplies)
+	}
+
+	flood()
+	if m, ok := parent(); !ok || m.NewReplies != 1 {
+		t.Fatalf("after more chatter: parent shown %v with %d new, want shown with 1", ok, m.NewReplies)
+	}
+	s.MarkThreadRead("C1", mine)
+	if s.NewReplies("C1") != 0 {
+		t.Fatalf("after reading the thread the channel counts %d, want 0", s.NewReplies("C1"))
+	}
+}
+
 func TestBroadcastsAndMyGroupsMentionMe(t *testing.T) {
 	s, _ := startStore(t, &fakeBackend{})
 	cases := map[string]bool{
