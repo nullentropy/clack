@@ -60,6 +60,9 @@ type window struct {
 	changes     []chat.Change // waiting for the session goroutine
 	changesKick chan struct{}
 
+	showing chan struct{}
+	closed  bool
+
 	backdrop *caution.Node
 	backFrag string // what backdrop shows, "" for nothing
 	shimmer  bool
@@ -179,7 +182,11 @@ func (w *window) renderTitle() {
 	}
 }
 
-func (w *window) close() { w.unsubscribe() }
+func (w *window) close() {
+	w.unsubscribe()
+	w.closed = true
+	w.noteVisible(true)
+}
 
 var fill = caution.A{Left: caution.Px(0), Right: caution.Px(0), Top: caution.Px(0), Bottom: caution.Px(0)}
 

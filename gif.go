@@ -178,10 +178,13 @@ func (w *window) animate(img *caution.Node, f chat.File, full bool) {
 		w.s.Update(func() { w.s.Preload(srcs...) })
 		for i := 0; ; i = (i + 1) % len(srcs) {
 			shown := make(chan bool, 1)
+			var hidden <-chan struct{}
 			w.s.Update(func() {
 				on := w.shows(img)
 				if on {
-					img.SetSrc(srcs[i])
+					if hidden = w.untilShown(); hidden == nil {
+						img.SetSrc(srcs[i])
+					}
 				}
 				shown <- on
 			})
@@ -193,6 +196,15 @@ func (w *window) animate(img *caution.Node, f chat.File, full bool) {
 			case <-ctx.Done():
 				return
 			}
+			if hidden != nil {
+				select {
+				case <-hidden:
+					i--
+					continue
+				case <-ctx.Done():
+					return
+				}
+			}
 			select {
 			case <-time.After(anim.delays[i]):
 			case <-ctx.Done():
@@ -202,7 +214,27 @@ func (w *window) animate(img *caution.Node, f chat.File, full bool) {
 	}()
 }
 
+func (w *window) untilShown() <-chan struct{} {
+	if w.s.Visible() {
+		return nil
+	}
+	if w.showing == nil {
+		w.showing = make(chan struct{})
+	}
+	return w.showing
+}
+
+func (w *window) noteVisible(visible bool) {
+	if visible && w.showing != nil {
+		close(w.showing)
+		w.showing = nil
+	}
+}
+
 func (w *window) shows(n *caution.Node) bool {
+	if w.closed {
+		return false
+	}
 	for ; n != nil; n = n.Parent() {
 		if n == w.root {
 			return true

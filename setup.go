@@ -327,6 +327,11 @@ func (a *app) mount(s *caution.Session) *caution.Node {
 			sc.win.markRead()
 		}
 	})
+	s.OnVisible(func(visible bool) {
+		if sc.win != nil {
+			sc.win.noteVisible(visible)
+		}
+	})
 	cancel := a.subscribe(func() { s.Update(sc.refresh) })
 	a.addScreen(sc, true)
 	go func() { <-s.Done(); cancel(); a.setFocused(sc, false); a.setOnChat(sc, false); a.addScreen(sc, false) }()

@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/gif"
 	"image/png"
 	"testing"
 	"time"
+
+	"github.com/nullentropy/caution"
+	"github.com/nullentropy/clack/chat"
 )
 
 // patchGIF is a 4x4 GIF: a red frame, then a 2x2 blue patch drawn over it,
@@ -88,5 +92,65 @@ func TestLongGIFsKeepTheirLengthWithFewerFrames(t *testing.T) {
 	}
 	if total != 16*time.Second {
 		t.Fatalf("plays for %v, want the original 16s", total)
+	}
+}
+
+func TestGIFsHoldStillWhileTheWindowIsHidden(t *testing.T) {
+	sc, c, _ := mountTestWindow(t)
+	w := sc.win
+	anim, err := decodeGIF(patchGIF(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := chat.File{ID: "F42", Name: "nutri-matic.gif", Mime: "image/gif"}
+	done := make(chan struct{})
+	close(done)
+	w.app.gifs.byKey = map[string]*gifEntry{fmt.Sprintf("%p/%s/%v", w.store, f.ID, false): {done: done, anim: anim}}
+
+	img := caution.Image("/files/F42")
+	runOnSession(t, sc, func() {
+		w.root.Add(img)
+		w.animate(img, f, false)
+	})
+	src := func() (v string) {
+		runOnSession(t, sc, func() { v, _ = img.Prop("src").(string) })
+		return v
+	}
+	steps := func(within time.Duration) bool {
+		from := src()
+		for deadline := time.Now().Add(within); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if src() != from {
+				return true
+			}
+		}
+		return false
+	}
+	visible := func(on bool) {
+		if err := c.WriteJSON(map[string]any{"t": "ev", "id": 0, "ev": "visible", "value": on, "seq": 1}); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+			var v bool
+			runOnSession(t, sc, func() { v = sc.s.Visible() })
+			if v == on {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the session never saw the window visible=%v", on)
+			}
+		}
+	}
+
+	if !steps(time.Second) {
+		t.Fatal("the GIF never stepped while the window was on screen")
+	}
+	visible(false)
+	time.Sleep(250 * time.Millisecond)
+	if steps(800 * time.Millisecond) {
+		t.Fatal("the GIF kept stepping while the window was hidden")
+	}
+	visible(true)
+	if !steps(time.Second) {
+		t.Fatal("the GIF did not start again when the window showed")
 	}
 }
