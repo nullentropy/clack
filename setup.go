@@ -323,6 +323,10 @@ func (a *app) mount(s *caution.Session) *caution.Node {
 	s.OnFocus(func(focused bool) {
 		sc.focused = focused
 		a.setFocused(sc, focused)
+		if !focused {
+			sc.glitchAt = time.Time{} // a running glitch sees 0 left and stops
+		}
+		sc.applyEffect()
 		if focused && sc.win != nil {
 			sc.win.markRead()
 		}
@@ -364,7 +368,7 @@ type screen struct {
 	asked    bool
 	askedGen int
 	fx       *caution.Node // the node carrying the effect
-	fxFrag   string
+	fxKey    string
 	effect   string     // the window effect's name
 	bg       [3]float64 // the theme background, which the effect composites over
 	glitchAt time.Time  // when the latest ping glitch started, zero when none is running
@@ -385,17 +389,19 @@ func (sc *screen) refresh() {
 func (sc *screen) applyEffect() {
 	cfg, theme := sc.a.fx(), sc.a.theme()
 	if sc.win != nil {
-		sc.win.setFX(cfg, theme)
+		sc.win.setFX(cfg, theme, sc.focused)
 	}
 	sc.effect, sc.bg = cfg.effect, hexRGB(theme["bg"])
 	fx := rootFX(sc.effect, sc.bg, sc.glitchLeft())
-	if sc.fx == sc.root && sc.fxFrag == fx.Frag {
+	fx.Animate = fx.Animate && sc.focused
+	key := fmt.Sprint(fx.Frag, fx.Animate)
+	if sc.fx == sc.root && sc.fxKey == key {
 		return
 	}
 	if sc.fx != nil && sc.fx != sc.root {
 		sc.fx.Effect(caution.FX{}) // the setup view and window swap roots
 	}
-	sc.fx, sc.fxFrag = sc.root, fx.Frag
+	sc.fx, sc.fxKey = sc.root, key
 	sc.root.Effect(fx)
 }
 
@@ -409,6 +415,9 @@ func (sc *screen) glitchLeft() float64 {
 
 // glitch runs the ping glitch, restarting it when one is already running
 func (sc *screen) glitch() {
+	if !sc.focused {
+		return
+	}
 	running := !sc.glitchAt.IsZero()
 	sc.glitchAt = time.Now()
 	sc.applyEffect()

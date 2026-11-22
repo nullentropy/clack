@@ -249,3 +249,65 @@ func TestAwayNicksFadeAndShowStatusOnHover(t *testing.T) {
 		t.Fatalf("Ford's nick is %v with tip %v", c, tip)
 	}
 }
+
+func TestAnimatedEffectsRunOnlyWhileFocused(t *testing.T) {
+	sc, c, _ := mountTestWindow(t)
+	for _, name := range []string{"ping", "shimmer", "sidebar"} {
+		if err := sc.a.setExtra(name, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := sc.a.setEffect("vhs"); err != nil {
+		t.Fatal(err)
+	}
+	animated := func() (n int) {
+		runOnSession(t, sc, func() {
+			var walk func(n *caution.Node)
+			walk = func(nd *caution.Node) {
+				if nd.Prop("animate") == true {
+					n++
+				}
+				if fx, ok := nd.Prop("effect").(map[string]any); ok && fx["animate"] == true {
+					n++
+				}
+				for _, k := range nd.Children() {
+					walk(k)
+				}
+			}
+			walk(sc.root)
+		})
+		return n
+	}
+	focus := func(on bool) {
+		if err := c.WriteJSON(map[string]any{"t": "ev", "id": 0, "ev": "focus", "value": on, "seq": 1}); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+			var f bool
+			runOnSession(t, sc, func() { f = sc.focused })
+			if f == on {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the screen never saw focused=%v", on)
+			}
+		}
+	}
+
+	if n := animated(); n < 3 {
+		t.Fatalf("focused with shimmer and the sidebar on, %d nodes animate, want the window, the backdrop and a mention", n)
+	}
+	focus(false)
+	if n := animated(); n != 0 {
+		t.Fatalf("unfocused, %d nodes still animate", n)
+	}
+	sc.a.ping()
+	time.Sleep(50 * time.Millisecond)
+	if n := animated(); n != 0 {
+		t.Fatalf("unfocused, a ping left %d nodes animating", n)
+	}
+	focus(true)
+	if n := animated(); n < 3 {
+		t.Fatalf("focused again, only %d nodes animate", n)
+	}
+}

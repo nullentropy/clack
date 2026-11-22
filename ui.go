@@ -552,13 +552,15 @@ func (w *window) closeThread() {
 	w.composer.Focus()
 }
 
-func (w *window) setFX(cfg fxSettings, theme map[string]string) {
+func (w *window) setFX(cfg fxSettings, theme map[string]string, focused bool) {
 	var back caution.FX
 	if cfg.sidebar {
 		back = backdrop(theme)
+		back.Animate = focused
 	}
+	cfg.shimmer = cfg.shimmer && focused
 	// the theme's colors are in the frag's uniforms, so compare those too
-	if key := back.Frag + fmt.Sprint(back.Uniforms); key != w.backFrag {
+	if key := fmt.Sprint(back.Frag, back.Uniforms, back.Animate); key != w.backFrag {
 		w.backFrag = key
 		w.backdrop.Clear()
 		if back.Frag != "" {
