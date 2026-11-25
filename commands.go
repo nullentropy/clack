@@ -59,6 +59,7 @@ KEYS
   Alt+1…9, Cmd+1…9       open the Nth buffer
   Alt+↑, Alt+↓           previous or next buffer
   Cmd+K, Ctrl+K          quick switcher; ↑ ↓ to pick, Enter to open
+  Cmd+V                  with an image copied, upload it
   Esc                    close a popup
 
 MOUSE
