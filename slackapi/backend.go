@@ -493,6 +493,14 @@ func (b *Backend) SetAway(ctx context.Context, away bool) error {
 	return b.api.SetUserPresenceContext(ctx, presence)
 }
 
+func (b *Backend) SetStatus(ctx context.Context, text string) error {
+	err := b.api.SetUserCustomStatusContext(ctx, text, "", 0)
+	if err != nil && strings.Contains(err.Error(), "missing_scope") {
+		return errors.New("Slack refused: the user token needs the users.profile:write scope, add it to your Slack app and reinstall it")
+	}
+	return err
+}
+
 func (b *Backend) Presence(ctx context.Context, user string) (bool, error) {
 	var p *slack.UserPresence
 	err := retry(ctx, func() (err error) {

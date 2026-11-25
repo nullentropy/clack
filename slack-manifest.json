@@ -31,6 +31,7 @@
         "search:read",
         "usergroups:read",
         "users:read",
+        "users.profile:write",
         "users:write"
       ]
     }

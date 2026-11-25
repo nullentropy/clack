@@ -243,6 +243,7 @@ type Backend interface {
 	SetTopic(ctx context.Context, channel, topic string) error
 	// SetAway sets the user away, or back to automatic presence
 	SetAway(ctx context.Context, away bool) error
+	SetStatus(ctx context.Context, text string) error
 	// Presence reports whether another user is away
 	Presence(ctx context.Context, user string) (away bool, err error)
 	// Upload posts a file to the channel, or into a thread when thread is set

@@ -64,6 +64,8 @@ type Store struct {
 	subs         map[int]func(Change)
 	nextSub      int
 	alert        func(Alert) // see OnAlert
+	awayStatus   string
+	onStatus     func(string)
 	posted       []msgKey
 	started      TS
 }

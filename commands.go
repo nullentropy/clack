@@ -110,9 +110,9 @@ func (w *window) command(to target, text string) bool {
 	case "notify":
 		w.notify(arg)
 	case "away":
-		w.setAway(true)
+		w.setAway(true, arg)
 	case "back":
-		w.setAway(false)
+		w.setAway(false, "")
 	case "autoaway":
 		w.autoAway(arg)
 	case "autoback":
@@ -215,10 +215,17 @@ func (w *window) topic(channel, text string) {
 	}()
 }
 
-func (w *window) setAway(away bool) {
+func (w *window) setAway(away bool, status string) {
 	go func() {
-		if err := w.store.SetAway(context.Background(), away); err != nil {
+		ctx := context.Background()
+		if err := w.store.SetAway(ctx, away); err != nil {
 			w.s.Update(func() { w.notice("presence failed: " + err.Error()) })
+		}
+		if status == "" {
+			return
+		}
+		if err := w.store.SetStatus(ctx, status); err != nil {
+			w.s.Update(func() { w.notice("status failed: " + err.Error()) })
 		}
 	}()
 }

@@ -3,6 +3,7 @@ package chat
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"log"
 	"maps"
 	"slices"
@@ -26,7 +27,61 @@ func (s *Store) SetAway(ctx context.Context, away bool) error {
 		s.notify(self)
 		return err
 	}
+	if !away {
+		if err := s.clearStatus(ctx); err != nil {
+			return fmt.Errorf("clearing status: %w", err)
+		}
+	}
 	return nil
+}
+
+func (s *Store) RememberStatus(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.awayStatus = text
+}
+
+func (s *Store) OnStatus(fn func(text string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onStatus = fn
+}
+
+func (s *Store) SetStatus(ctx context.Context, text string) error {
+	if err := s.backend.SetStatus(ctx, text); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	u := s.users[s.snap.Self]
+	u.ID, u.Status, u.StatusEmoji, u.StatusUntil = s.snap.Self, text, "", time.Time{}
+	s.mu.Unlock()
+	s.Apply(UserChanged{User: u})
+	s.remember(text)
+	return nil
+}
+
+func (s *Store) clearStatus(ctx context.Context) error {
+	s.mu.Lock()
+	text, now := s.awayStatus, s.users[s.snap.Self].Status
+	s.mu.Unlock()
+	switch {
+	case text == "":
+		return nil
+	case now == text:
+		return s.SetStatus(ctx, "")
+	}
+	s.remember("")
+	return nil
+}
+
+func (s *Store) remember(text string) {
+	s.mu.Lock()
+	s.awayStatus = text
+	fn := s.onStatus
+	s.mu.Unlock()
+	if fn != nil {
+		fn(text)
+	}
 }
 
 // 0 to turn off autoaway

@@ -280,6 +280,8 @@ func (d *Demo) Search(_ context.Context, query string) ([]Hit, error) {
 
 func (d *Demo) SetAway(context.Context, bool) error { return nil }
 
+func (d *Demo) SetStatus(context.Context, string) error { return nil }
+
 func (d *Demo) Presence(_ context.Context, user string) (bool, error) { return demoAway[user], nil }
 
 func (d *Demo) Edit(_ context.Context, channel string, ts TS, text string) error {

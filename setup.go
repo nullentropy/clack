@@ -50,6 +50,7 @@ type settings struct {
 	WindowW     int    `json:"window_w,omitempty"`   // restored window size in logical px
 	WindowH     int    `json:"window_h,omitempty"`
 	Maximized   bool   `json:"maximized,omitempty"`
+	AwayStatus  string `json:"away_status,omitempty"`
 }
 
 func loadSettings(path string) (settings, error) {
@@ -197,6 +198,12 @@ func (a *app) applyPresence(store *chat.Store) {
 	}
 	store.SetAutoAway(d)
 	store.SetAutoBack(s.AutoBack)
+	store.RememberStatus(s.AwayStatus)
+	store.OnStatus(func(text string) {
+		if err := a.updateSettings(func(s *settings) { s.AwayStatus = text }); err != nil {
+			log.Printf("settings: %v", err)
+		}
+	})
 }
 
 func (a *app) tokens() settings {
