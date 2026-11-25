@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>clack: a calmer slack client</title>
+<meta name="description" content="clack shows the conversations you joined and the places someone mentioned you. everything else waits.">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <img src="icon.svg" alt="" width="40" height="40">
+  <h1>clack</h1>
+  <nav><a href="https://github.com/nullentropy/clack">github</a></nav>
+</header>
+
+<main>
+<section class="intro">
+  <h2>quiet the noise.<span class="cursor" aria-hidden="true"></span></h2>
+  <p class="links">
+    <a class="button" href="#install">install</a>
+    <a class="button quiet" href="https://github.com/nullentropy/clack">source on github</a>
+  </p>
+  <figure>
+    <a href="img/terminal.webp">
+      <img src="img/terminal.webp" width="1600" height="1000" alt="clack in its terminal theme" />
+    </a>
+  </figure>
+</section>
+
+<section id="install">
+  <h2>install</h2>
+  <h3>macos</h3>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/nullentropy/clack/main/install.sh | sh</code></pre>
+  <p>downloads the latest release into <code>/Applications</code>.</p>
+  <h3>linux</h3>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/nullentropy/clack/main/install.sh | sh</code></pre>
+  <p>installs clack in <code>~/.local</code></p>
+  <h3>windows</h3>
+  <p>in powershell:</p>
+  <pre><code>irm https://raw.githubusercontent.com/nullentropy/clack/main/install.ps1 | iex</code></pre>
+  <p>installs clack in <code>%LOCALAPPDATA%\Programs\clack</code> and adds it to the start menu.</p>
+  <p class="links">
+    <a class="button" href="https://github.com/nullentropy/clack/releases/latest">latest release</a>
+  </p>
+</section>
+
+<section>
+  <h3>requirements</h3>
+  <ul>
+    <li>a slack workspace that lets you create and install apps</li>
+    <li>on linux: an x11 or xwayland desktop with opengl, the alsa library, and notify-send (for notifications)</li>
+  </ul>
+</section>
+</main>
+</body>
+</html>
