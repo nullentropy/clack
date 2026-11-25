@@ -17,6 +17,8 @@ import (
 	"github.com/nullentropy/clack/chat"
 )
 
+var packaged bool
+
 func main() {
 	nativeFlag := flag.Bool("native", false, "open as a desktop window instead of serving HTTP")
 	addr := flag.String("addr", ":8787", `listen address: ":8787" or "unix:/path.sock"`)
@@ -25,6 +27,8 @@ func main() {
 	dir := flag.String("config", configDir(), "directory for settings.json and the lists of conversations open in clack")
 	debug := flag.Bool("debug", false, "log each live event from Slack")
 	flag.Parse()
+	addrSet := false
+	flag.Visit(func(f *flag.Flag) { addrSet = addrSet || f.Name == "addr" })
 
 	a := &app{dir: *dir, debug: *debug}
 	win := &windowSaver{a: a}
@@ -46,7 +50,7 @@ func main() {
 	http.HandleFunc("/files/", a.serveFile)
 	serveFonts()
 	caution.ServeClient()
-	if *nativeFlag || native.InBundle() {
+	if *nativeFlag || native.InBundle() || packaged && !addrSet {
 		saved, err := loadSettings(a.settingsPath())
 		if err != nil {
 			log.Printf("settings: %v", err)
@@ -54,7 +58,7 @@ func main() {
 		w, h := windowSize(saved)
 		err = native.Run(a.mount, native.Options{
 			Title: "clack", W: w, H: h, Maximized: saved.Maximized,
-			OnWindow: win.note, MaxFPS: animationFPS,
+			OnWindow: win.note, MaxFPS: animationFPS, AppID: "clack",
 		})
 		win.flush()
 		if err != nil {
