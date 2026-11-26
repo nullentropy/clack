@@ -1,19 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
-    <pattern id="tape" width="96" height="96" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-      <rect width="96" height="96" fill="#17191d"/>
-      <rect width="48" height="96" fill="#f6c21c"/>
-    </pattern>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="24"/>
+    </filter>
+    <linearGradient id="skirt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a4150"/>
+      <stop offset="1" stop-color="#19171d"/>
+    </linearGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a4150"/>
+      <stop offset="1" stop-color="#2e343e"/>
+    </linearGradient>
   </defs>
-  <g clip-path="url(#tile)">
-    <rect x="100" y="100" width="824" height="824" fill="#1d2025"/>
-    <rect x="100" y="836" width="824" height="88" fill="url(#tape)"/>
-  </g>
-  <polygon points="512,214 842,772 182,772" fill="#f6c21c" stroke="#f6c21c" stroke-width="72" stroke-linejoin="round"/>
-  <polygon points="512,296 772,736 252,736" fill="none" stroke="#17191d" stroke-width="30" stroke-linejoin="round"/>
-  <g fill="#17191d">
-    <line x1="512" y1="452" x2="512" y2="600" stroke="#17191d" stroke-width="64" stroke-linecap="round"/>
-    <circle cx="512" cy="680" r="38"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#1a1d21"/>
+  <rect x="118" y="118" width="788" height="788" rx="167" fill="none" stroke="#3a4150" stroke-width="12"/>
+  <g transform="rotate(-9 512 520)">
+    <rect x="252" y="300" width="520" height="500" rx="70" fill="#000000" opacity="0.5" filter="url(#shadow)"/>
+    <rect x="232" y="232" width="560" height="560" rx="76" fill="url(#skirt)" stroke="#4a5262" stroke-width="8"/>
+    <rect x="300" y="262" width="424" height="420" rx="54" fill="url(#top)" stroke="#6b7280" stroke-width="6"/>
+    <g fill="#d1d2d3">
+      <rect x="486" y="352" width="52" height="166"/>
+      <rect x="486" y="548" width="52" height="52"/>
+    </g>
   </g>
 </svg>
