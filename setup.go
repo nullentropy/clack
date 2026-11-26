@@ -391,7 +391,7 @@ type screen struct {
 	glitchAt time.Time  // when the latest ping glitch started, zero when none is running
 
 	menuSet bool
-	menuTag string
+	menuSig string
 	dialog  *caution.Node
 }
 

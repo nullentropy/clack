@@ -8,22 +8,6 @@ import (
 	"github.com/nullentropy/caution"
 )
 
-func (sc *screen) setMenu() {
-	if !sc.a.appMenu {
-		return
-	}
-	tag := sc.a.UpdateReady()
-	if sc.menuSet && tag == sc.menuTag {
-		return
-	}
-	sc.menuSet, sc.menuTag = true, tag
-	items := []caution.MenuItem{{Title: "Check for Updates…", OnPick: sc.checkForUpdates}}
-	if tag != "" {
-		items = append(items, caution.MenuItem{Title: "Restart to Update to " + strings.TrimPrefix(tag, "v"), OnPick: sc.restartToUpdate})
-	}
-	sc.s.SetMenu(caution.Menu{Title: "clack", App: true, Items: items})
-}
-
 func (sc *screen) showDialog(d *caution.Node) {
 	sc.closeDialog()
 	if w := sc.win; w != nil && sc.root == w.root {

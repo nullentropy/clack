@@ -59,6 +59,7 @@ KEYS
   Alt+1…9, Cmd+1…9       open the Nth buffer
   Alt+↑, Alt+↓           previous or next buffer
   Cmd+K, Ctrl+K          quick switcher; ↑ ↓ to pick, Enter to open
+  Cmd+,                  settings, on macOS
   Cmd+V                  with an image copied, upload it
   Esc                    close a popup
 
@@ -301,6 +302,7 @@ func (w *window) notify(arg string) {
 			w.notice("couldn't save settings: " + err.Error())
 			return
 		}
+		w.app.notify()
 	case "":
 	default:
 		w.notice("usage: /notify on, /notify off, or /notify <corner name>")
@@ -324,6 +326,7 @@ func (w *window) notifyCorner(corner string) {
 			w.notice("couldn't save settings: " + err.Error())
 			return
 		}
+		w.app.notify()
 	}
 	w.notice("while clack has focus, notifications show in the " + w.app.toastCorner() + " corner")
 }

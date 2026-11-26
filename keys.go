@@ -12,11 +12,7 @@ import (
 func (sc *screen) bindKeys() {
 	on := func(fn func(w *window), combos ...string) {
 		for _, c := range combos {
-			sc.s.OnKey(c, func() {
-				if sc.win != nil && sc.root == sc.win.root {
-					fn(sc.win)
-				}
-			})
+			sc.s.OnKey(c, sc.onChat(fn))
 		}
 	}
 	for n := 1; n <= 9; n++ {

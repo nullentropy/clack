@@ -67,6 +67,9 @@ type window struct {
 	backFrag string // what backdrop shows, "" for nothing
 	shimmer  bool
 
+	menu        func()
+	menuBuffers []string
+
 	active     string                    // a channel ID, or statusKey
 	newSince   chat.TS                   // the read cursor when active opened with unread messages
 	notes      []statusEntry             // lines commands added to the status buffer
@@ -101,7 +104,7 @@ type window struct {
 // newWindow makes sc's view of store
 func newWindow(sc *screen, store *chat.Store) *window {
 	s := sc.s
-	w := &window{s: s, store: store, changesKick: make(chan struct{}, 1), app: sc.a, quit: sc.a.quit, tokens: sc.askTokens, focused: sc.isFocused,
+	w := &window{s: s, store: store, changesKick: make(chan struct{}, 1), app: sc.a, quit: sc.a.quit, tokens: sc.askTokens, menu: sc.setMenu, focused: sc.isFocused,
 		drafts: sc.a.takeDrafts()}
 	w.renderTitle()
 
@@ -249,7 +252,7 @@ func (w *window) changed(c chat.Change) {
 	if c.Channel != "" && c.Channel == w.thread.channel {
 		w.renderThread()
 	}
-	w.sidebar.render(w.sidebarRows())
+	w.renderSidebar()
 }
 
 func (w *window) open(id string) {
@@ -267,7 +270,7 @@ func (w *window) open(id string) {
 		w.composer.Placeholder("/join a channel or person, or /help")
 		w.markRead()
 		w.renderTimeline()
-		w.sidebar.render(w.sidebarRows())
+		w.renderSidebar()
 		w.composer.Focus()
 		return
 	}
@@ -287,7 +290,7 @@ func (w *window) open(id string) {
 	if last := w.renderTimeline(); last != nil {
 		last.Reveal()
 	}
-	w.sidebar.render(w.sidebarRows())
+	w.renderSidebar()
 	w.composer.Focus()
 }
 
