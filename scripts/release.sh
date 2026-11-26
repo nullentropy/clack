@@ -52,7 +52,7 @@ release_macos() {
 			MACOSX_DEPLOYMENT_TARGET=$min_macos \
 			CGO_CFLAGS="-O2 -g -mmacosx-version-min=$min_macos" \
 			CGO_LDFLAGS="-mmacosx-version-min=$min_macos" \
-			go build -trimpath -o "$work/clack-$arch" .)
+			go build -trimpath -ldflags "-X main.version=$version" -o "$work/clack-$arch" .)
 		minos=$(vtool -show-build "$work/clack-$arch" | awk '$1 == "minos" { print $2 }')
 		if [ "$minos" != "$min_macos" ]; then
 			echo "$arch binary declares macOS $minos, want $min_macos" >&2
@@ -80,7 +80,7 @@ release_macos() {
 release_linux() {
 	arch=$(go env GOARCH)
 	tgz="$out/clack-$version-linux-$arch.tar.gz"
-	(cd "$work/src" && CGO_ENABLED=1 go build -trimpath -o "$work/clack" .)
+	(cd "$work/src" && CGO_ENABLED=1 go build -trimpath -ldflags "-X main.version=$version" -o "$work/clack" .)
 	(cd "$work/src" && go run github.com/nullentropy/caution/cmd/linuxapp -bin "$work/clack" -name clack -id clack -icon icon.png \
 		-comment "Slack desktop client" -categories "Network;Chat;" -o "$work/stage")
 

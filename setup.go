@@ -50,6 +50,7 @@ type settings struct {
 	WindowW     int    `json:"window_w,omitempty"`   // restored window size in logical px
 	WindowH     int    `json:"window_h,omitempty"`
 	Maximized   bool   `json:"maximized,omitempty"`
+	UpdatesOff  bool   `json:"updates_off,omitempty"`
 	AwayStatus  string `json:"away_status,omitempty"`
 }
 
@@ -89,6 +90,7 @@ type app struct {
 	debug bool // log Slack's live events
 
 	trafficLights bool
+	appMenu       bool
 
 	dock dock
 	gifs gifCache
@@ -104,6 +106,11 @@ type app struct {
 	focused    map[*screen]bool // sessions whose window has focus
 	onChat     map[*screen]bool
 	screens    map[*screen]bool
+
+	updater   *updater
+	restart   func() error
+	stageMu   sync.Mutex
+	updateTag string
 }
 
 func (a *app) setFocused(sc *screen, focused bool) {
@@ -350,6 +357,7 @@ func (a *app) mount(s *caution.Session) *caution.Node {
 	go func() { <-s.Done(); cancel(); a.setFocused(sc, false); a.setOnChat(sc, false); a.addScreen(sc, false) }()
 	sc.root = sc.view()
 	sc.applyEffect()
+	sc.setMenu()
 	return sc.root
 }
 
@@ -381,6 +389,10 @@ type screen struct {
 	effect   string     // the window effect's name
 	bg       [3]float64 // the theme background, which the effect composites over
 	glitchAt time.Time  // when the latest ping glitch started, zero when none is running
+
+	menuSet bool
+	menuTag string
+	dialog  *caution.Node
 }
 
 func (sc *screen) isFocused() bool { return sc.focused }
@@ -392,6 +404,7 @@ func (sc *screen) refresh() {
 		sc.s.SetRoot(n)
 	}
 	sc.applyEffect()
+	sc.setMenu()
 }
 
 // applyEffect puts the chosen effects on the root and the window
@@ -562,6 +575,7 @@ func newSetupView(a *app, cancel func()) *setupView {
 		heading("Presence and notifications"),
 	)
 	v.form.Kids(presenceFields(a, t, caption)...)
+	v.form.Kids(caution.Panel().H(12), heading("Updates"), updateField(a, t))
 	v.form.Kids(v.cancelSlot)
 	v.card = caution.VStack().Gap(10).Align("stretch").W(520).
 		Anchor(caution.A{CenterX: caution.Px(0), CenterY: caution.Px(0)}).

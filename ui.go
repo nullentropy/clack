@@ -102,7 +102,7 @@ type window struct {
 func newWindow(sc *screen, store *chat.Store) *window {
 	s := sc.s
 	w := &window{s: s, store: store, changesKick: make(chan struct{}, 1), app: sc.a, quit: sc.a.quit, tokens: sc.askTokens, focused: sc.isFocused,
-		drafts: map[target]string{}}
+		drafts: sc.a.takeDrafts()}
 	w.renderTitle()
 
 	me, _ := store.User(store.Self())

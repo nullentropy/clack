@@ -37,6 +37,9 @@ func main() {
 		win.flush()
 		os.Exit(0)
 	}
+	if !*demo {
+		startUpdates(a, win.flush)
+	}
 	if *demo {
 		store := chat.NewStore(&chat.Demo{Chatter: *chatter}, *dir)
 		ctx, stop := context.WithCancel(context.Background())
@@ -58,6 +61,7 @@ func main() {
 		}
 		w, h := windowSize(saved)
 		a.trafficLights = runtime.GOOS == "darwin"
+		a.appMenu = runtime.GOOS == "darwin"
 		err = native.Run(a.mount, native.Options{
 			Title: "clack", W: w, H: h, Maximized: saved.Maximized,
 			OnWindow: win.note, MaxFPS: animationFPS, AppID: "clack",

@@ -26,6 +26,7 @@ git worktree add --detach --quiet $src HEAD
 if ($LASTEXITCODE -ne 0) { throw 'git worktree add failed' }
 try {
 	Set-Content -Path (Join-Path $src 'packaged_release.go') -Value "package main`n`nfunc init() { packaged = true }"
+	Set-Content -Path (Join-Path $src 'version_release.go') -Value "package main`n`nfunc init() { version = `"$Version`" }"
 	Push-Location $src
 	go run github.com/nullentropy/caution/cmd/winapp -pkg . -name clack -id dev.caution.clack -icon icon.png -o $stage -cc gcc
 	if ($LASTEXITCODE -ne 0) { throw 'winapp failed' }
