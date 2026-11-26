@@ -33,17 +33,19 @@ type sideNodes struct {
 	row, num, label, glass *caution.Node
 }
 
-func newSidebar(team string, trafficLights bool, open func(id string)) *sidebar {
+func newSidebar(team, nick string, trafficLights bool, open func(id string)) *sidebar {
 	sb := &sidebar{open: open}
 	left := 12.0
 	if trafficLights {
 		left += 72
 	}
 	sb.col = caution.VStack().Gap(0).Align("stretch").
-		Anchor(caution.A{Left: caution.Px(0), Right: caution.Px(0), Top: caution.Px(4)})
+		Anchor(caution.A{Left: caution.Px(0), Right: caution.Px(0), Top: caution.Px(16)})
 	sb.root = caution.DockPanel().Kids(
 		headerBar(
-			caution.Label(team).Mono().FontSize(fontSize).Weight(700).Anchor(caution.A{Left: caution.Px(left), CenterY: caution.Px(0)}),
+			caution.VStack().Gap(2).Align("end").
+				Anchor(caution.A{Left: caution.Px(left), Right: caution.Px(12), CenterY: caution.Px(0)}).
+				Kids(caution.Label(team).FontSize(16).Weight(700), caution.Label(nick).FontSize(12).Color("$inkFaint")),
 		),
 		caution.Scroll().InsetBottom(8).Kids(sb.col),
 	)

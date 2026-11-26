@@ -105,7 +105,8 @@ func newWindow(sc *screen, store *chat.Store) *window {
 		drafts: map[target]string{}}
 	w.renderTitle()
 
-	w.sidebar = newSidebar(store.Team(), sc.a.trafficLights, w.open)
+	me, _ := store.User(store.Self())
+	w.sidebar = newSidebar(store.Team(), me.Display(), sc.a.trafficLights, w.open)
 
 	w.title = caution.Label("").FontSize(16).Weight(700)
 	w.status = caution.Label("").FontSize(12).Color("$inkFaint")
