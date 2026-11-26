@@ -105,7 +105,7 @@ func newWindow(sc *screen, store *chat.Store) *window {
 		drafts: map[target]string{}}
 	w.renderTitle()
 
-	w.sidebar = newSidebar(store.Team(), w.open)
+	w.sidebar = newSidebar(store.Team(), sc.a.trafficLights, w.open)
 
 	w.title = caution.Label("").FontSize(16).Weight(700)
 	w.status = caution.Label("").FontSize(12).Color("$inkFaint")
@@ -191,7 +191,7 @@ func (w *window) close() {
 var fill = caution.A{Left: caution.Px(0), Right: caution.Px(0), Top: caution.Px(0), Bottom: caution.Px(0)}
 
 func headerBar(kids ...*caution.Node) *caution.Node {
-	return caution.Panel().Dock("top").H(56).Kids(kids...).Kids(
+	return caution.Panel().Dock("top").H(56).WindowDrag().Kids(kids...).Kids(
 		caution.Panel().H(1).Bg("$edge").Anchor(caution.A{Left: caution.Px(0), Right: caution.Px(0), Bottom: caution.Px(0)}),
 	)
 }

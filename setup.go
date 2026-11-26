@@ -88,6 +88,8 @@ type app struct {
 	quit  func()
 	debug bool // log Slack's live events
 
+	trafficLights bool
+
 	dock dock
 	gifs gifCache
 
@@ -564,7 +566,7 @@ func newSetupView(a *app, cancel func()) *setupView {
 	v.card = caution.VStack().Gap(10).Align("stretch").W(520).
 		Anchor(caution.A{CenterX: caution.Px(0), CenterY: caution.Px(0)}).
 		Kids(v.title, v.status)
-	v.root = caution.Panel().Kids(v.card)
+	v.root = caution.Panel().Kids(v.card, caution.Panel().H(56).WindowDrag().Anchor(caution.A{Left: caution.Px(0), Right: caution.Px(0), Top: caution.Px(0)}))
 	return v
 }
 

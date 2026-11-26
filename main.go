@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/nullentropy/caution"
@@ -56,9 +57,11 @@ func main() {
 			log.Printf("settings: %v", err)
 		}
 		w, h := windowSize(saved)
+		a.trafficLights = runtime.GOOS == "darwin"
 		err = native.Run(a.mount, native.Options{
 			Title: "clack", W: w, H: h, Maximized: saved.Maximized,
 			OnWindow: win.note, MaxFPS: animationFPS, AppID: "clack",
+			CustomTitlebar: a.trafficLights,
 		})
 		win.flush()
 		if err != nil {
