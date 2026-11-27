@@ -419,7 +419,7 @@ func TestSwitcherArrowsMoveTheHighlightAndEnterOpensIt(t *testing.T) {
 	if opened != "C2" {
 		t.Fatalf("Down twice then Enter opened %q, want C2", opened)
 	}
-	sw.move(1) // past the end wraps to the top
+	sw.move(1)
 	sw.move(-1)
 	sw.move(-1)
 	sw.choose()
@@ -427,7 +427,7 @@ func TestSwitcherArrowsMoveTheHighlightAndEnterOpensIt(t *testing.T) {
 		t.Fatalf("wrapping around opened %q, want C1", opened)
 	}
 	sw.move(1)
-	sw.filter("c2") // typing starts the highlight over
+	sw.filter("c2")
 	sw.choose()
 	if opened != "C2" {
 		t.Fatalf("after typing, Enter opened %q, want the first match", opened)

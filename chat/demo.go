@@ -35,7 +35,6 @@ var demoUsers = []User{
 	{ID: "U3", Name: "ford", RealName: "Ford Prefect", StatusEmoji: ":thumbsup:", Status: "Hitching a ride"},
 }
 
-// demoAway is who the demo shows as away
 var demoAway = map[string]bool{"U2": true}
 
 var demoChannels = []Channel{
@@ -134,6 +133,10 @@ var demoReactions = map[string]map[time.Duration][]Reaction{
 	"C2": {5 * time.Hour: {{Name: "tada", Users: []string{"U1", "U2", "U0"}}}},
 }
 
+var demoBroadcasts = map[string]map[time.Duration]bool{
+	"C1": {2*time.Hour + 40*time.Minute: true},
+}
+
 var demoSystem = map[string]map[time.Duration]bool{
 	"C1": {39*time.Minute + 30*time.Second: true},
 	"C2": {4*time.Hour - 2*time.Minute: true},
@@ -149,6 +152,15 @@ var demoChatter = []struct{ channel, user, text string }{
 	{"C3", "U1", "Added towels to the checklist."},
 	{"C4", "U3", "<@U0> can we archive this channel now?"},
 	{"D3", "U3", "Got a minute to look at the improbability numbers?"},
+}
+
+var demoBroadcastChatter = []struct {
+	channel string
+	thread  time.Duration
+	user    string
+	text    string
+}{
+	{"C1", 2*time.Hour + 58*time.Minute, "U1", "Same rules for the Magrathea debrief, one minute each."},
 }
 
 func (d *Demo) Bootstrap(context.Context) (Snapshot, error) {
@@ -169,7 +181,15 @@ func (d *Demo) History(_ context.Context, channel string) ([]Message, error) {
 			m.ThreadTS, m.Replies = m.TS, n
 		}
 		out = append(out, m)
+		for _, r := range demoReplies[channel][h.ago] {
+			if demoBroadcasts[channel][r.ago] {
+				b := d.message(r)
+				b.ThreadTS, b.Broadcast, b.Root = m.TS, true, m.Text
+				out = append(out, b)
+			}
+		}
 	}
+	slices.SortFunc(out, func(a, b Message) int { return strings.Compare(string(a.TS), string(b.TS)) })
 	return out, nil
 }
 
@@ -185,6 +205,9 @@ func (d *Demo) Replies(_ context.Context, channel string, thread TS) ([]Message,
 		for _, r := range replies {
 			m := d.message(r)
 			m.ThreadTS = thread
+			if demoBroadcasts[channel][r.ago] {
+				m.Broadcast, m.Root = true, parent.Text
+			}
 			out = append(out, m)
 		}
 		return out, nil
@@ -333,7 +356,6 @@ func (d *Demo) Download(_ context.Context, url string, w io.Writer) error {
 	return png.Encode(w, img)
 }
 
-// spinGIF is a yellow block running along a track
 func spinGIF() *gif.GIF {
 	pal := color.Palette{color.RGBA{0x1d, 0x20, 0x25, 0xff}, color.RGBA{0x55, 0x5a, 0x63, 0xff}, color.RGBA{0xf6, 0xc2, 0x1c, 0xff}}
 	const w, h, steps = 320, 120, 12
@@ -355,6 +377,15 @@ func spinGIF() *gif.GIF {
 		g.Disposal = append(g.Disposal, gif.DisposalNone)
 	}
 	return g
+}
+
+func (d *Demo) parent(channel string, ago time.Duration) Message {
+	for _, h := range demoHistory[channel] {
+		if h.ago == ago {
+			return d.message(h)
+		}
+	}
+	return Message{}
 }
 
 func (d *Demo) message(l demoLine) Message {
@@ -390,8 +421,16 @@ func (d *Demo) Listen(ctx context.Context, emit func(Event)) error {
 		case <-ctx.Done():
 			return nil
 		case <-tick.C:
-			c := demoChatter[rand.IntN(len(demoChatter))]
-			emit(Posted{Channel: c.channel, Msg: Message{TS: TSFromTime(time.Now()), User: c.user, Text: c.text}})
+			i := rand.IntN(len(demoChatter) + len(demoBroadcastChatter))
+			if i < len(demoChatter) {
+				c := demoChatter[i]
+				emit(Posted{Channel: c.channel, Msg: Message{TS: TSFromTime(time.Now()), User: c.user, Text: c.text}})
+				continue
+			}
+			c := demoBroadcastChatter[i-len(demoChatter)]
+			parent := d.parent(c.channel, c.thread)
+			emit(Posted{Channel: c.channel, Msg: Message{TS: TSFromTime(time.Now()), User: c.user, Text: c.text,
+				ThreadTS: parent.TS, Broadcast: true, Root: parent.Text}})
 		}
 	}
 }

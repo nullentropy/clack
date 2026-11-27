@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"net"
 	"strings"
@@ -111,7 +112,6 @@ func runOnSession(t *testing.T, sc *screen, fn func()) {
 	}
 }
 
-// node is a mounted node as the client receives it.
 type node struct {
 	ID   int            `json:"id"`
 	P    map[string]any `json:"p"`
@@ -309,5 +309,92 @@ func TestAnimatedEffectsRunOnlyWhileFocused(t *testing.T) {
 	focus(true)
 	if n := animated(); n < 3 {
 		t.Fatalf("focused again, only %d nodes animate", n)
+	}
+}
+
+func TestThreadBroadcastsSayWhichThreadAndOpenIt(t *testing.T) {
+	sc, _, _ := mountTestWindow(t)
+	type line struct{ text, action string }
+	lines := func(col func() *caution.Node) (out []line) {
+		runOnSession(t, sc, func() {
+			var walk func(n *caution.Node)
+			walk = func(n *caution.Node) {
+				if spans, ok := n.Prop("spans").([]caution.Span); ok {
+					var l line
+					for _, sp := range spans {
+						l.text += sp.Text
+						l.action = cmp.Or(l.action, sp.Action)
+					}
+					out = append(out, l)
+				}
+				for _, k := range n.Children() {
+					walk(k)
+				}
+			}
+			walk(col())
+		})
+		return out
+	}
+	timeline := func() *caution.Node { return sc.win.timeline.col }
+	threadPane := func() *caution.Node { return sc.win.threadLog.col }
+	waitFor := func(col func() *caution.Node, text string) line {
+		t.Helper()
+		for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+			for _, l := range lines(col) {
+				if l.text == text {
+					return l
+				}
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("no line %q among %+v", text, lines(col))
+			}
+		}
+	}
+	count := func(col func() *caution.Node, match func(string) bool) (n int) {
+		for _, l := range lines(col) {
+			if match(l.text) {
+				n++
+			}
+		}
+		return n
+	}
+
+	fromHistory := waitFor(timeline, "replied to a thread: Also, for anyone joining late: we go round the bridge left to right, keep update…")
+	waitFor(timeline, "Works for me. I'll keep a timer going.")
+	msgs, _ := sc.win.store.Timeline("C1")
+	var parent chat.TS
+	var broadcast chat.Message
+	for _, m := range msgs {
+		if strings.HasPrefix(m.Text, "Also, for anyone joining late") {
+			parent = m.TS
+		}
+		if m.Broadcast {
+			broadcast = m
+		}
+	}
+	sc.win.store.Apply(chat.Edited{Channel: "C1", Msg: chat.Message{TS: broadcast.TS, User: broadcast.User,
+		Text: "Works for me. I'll keep a timer going, Arthur.", ThreadTS: parent, Broadcast: true}})
+	waitFor(timeline, "Works for me. I'll keep a timer going, Arthur.")
+	fromHistory = waitFor(timeline, fromHistory.text)
+	runOnSession(t, sc, func() { sc.win.spanClick(fromHistory.action) })
+	if sc.win.thread != (target{"C1", parent}) {
+		t.Fatalf("clicking %q opened thread %+v, want C1/%s", fromHistory.text, sc.win.thread, parent)
+	}
+	waitFor(threadPane, "Works for me. I'll keep a timer going.")
+
+	sc.win.store.Apply(chat.Posted{Channel: "C1", Msg: chat.Message{TS: chat.TSFromTime(time.Now()), User: "U1",
+		Text: "Zaphod's update: the Heart of Gold is parked.", ThreadTS: parent, Broadcast: true}})
+	fromLive := waitFor(timeline, "replied to a thread")
+	waitFor(threadPane, "Zaphod's update: the Heart of Gold is parked.")
+	if fromLive.action != fromHistory.action {
+		t.Fatalf("the live broadcast's line opens %q, want %q", fromLive.action, fromHistory.action)
+	}
+	for _, text := range []string{"Works for me. I'll keep a timer going.", "Zaphod's update: the Heart of Gold is parked."} {
+		if n := count(threadPane, func(s string) bool { return s == text }); n != 1 {
+			t.Fatalf("the thread shows %q %d times, want once", text, n)
+		}
+	}
+	if n := count(threadPane, func(s string) bool { return strings.HasPrefix(s, "replied to a thread") }); n != 0 {
+		t.Fatalf("the thread labels %d of its replies as broadcasts", n)
 	}
 }

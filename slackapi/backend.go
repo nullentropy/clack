@@ -33,10 +33,10 @@ type Backend struct {
 	apiURL  string
 	Debug   bool
 	self    string
-	handles map[string]string // user handle -> ID, to read group DM names
+	handles map[string]string // handle to ID, for reading group DM names
 
 	mu   sync.Mutex
-	bots map[string]string // bot ID -> name, for apps whose messages don't say
+	bots map[string]string // ID to name, for apps whose messages don't name them
 }
 
 func New(userToken, appToken string) *Backend {
@@ -48,8 +48,8 @@ func (b *Backend) Bootstrap(ctx context.Context) (chat.Snapshot, error) {
 	if err != nil {
 		return chat.Snapshot{}, fmt.Errorf("auth.test: %w", err)
 	}
-	// socket mode will give up when slack refuses the token so do it now while we can
-	// report if it doesn't work
+	// Socket mode gives up when slack refuses the token, so try it now
+	// while the error can still be reported.
 	if _, _, err := b.api.StartSocketModeContext(ctx); err != nil {
 		return chat.Snapshot{}, fmt.Errorf("the app-level token can't open Socket Mode (%w): check Socket Mode is on, and make a new token with connections:write under Basic Information", err)
 	}
@@ -127,7 +127,7 @@ func user(u slack.User) chat.User {
 	return out
 }
 
-// slackUser is the part of a user_change event's user that user reads
+// slackUser copies only the fields that user reads.
 func slackUser(u slackevents.User) slack.User {
 	return slack.User{ID: u.ID, Name: u.Name, RealName: u.RealName, Profile: slack.UserProfile{
 		DisplayName: u.Profile.DisplayName, Image72: u.Profile.Image72,
@@ -262,7 +262,7 @@ func (b *Backend) History(ctx context.Context, channel string) ([]chat.Message, 
 	// slack returns newest first
 	out := make([]chat.Message, len(resp.Messages))
 	for i, m := range resp.Messages {
-		out[len(out)-1-i] = b.message(ctx, m.Msg)
+		out[len(out)-1-i] = withRoot(b.message(ctx, m.Msg), m.Root)
 	}
 	return out, nil
 }
@@ -315,12 +315,12 @@ func (b *Backend) message(ctx context.Context, m slack.Msg) chat.Message {
 	case username != "" || m.BotID == "" || m.User != "":
 	case m.BotProfile != nil:
 		username = m.BotProfile.Name
-	default: // incoming webhooks name nobody
+	default: // incoming webhooks have no user and no bot profile
 		username = b.botName(ctx, m.BotID)
 	}
 	text := m.Text
 	if m.SubType == "huddle_thread" && text == "" {
-		text = "A huddle started" // as slack writes it, for the huddle's thread to hang off
+		text = "A huddle started" // slack's wording; the huddle's thread hangs off this message
 	}
 	return chat.Message{
 		System:      systemSubtypes[m.SubType],
@@ -329,6 +329,7 @@ func (b *Backend) message(ctx context.Context, m slack.Msg) chat.Message {
 		Username:    username,
 		Text:        text,
 		ThreadTS:    chat.TS(m.ThreadTimestamp),
+		Broadcast:   m.SubType == "thread_broadcast",
 		Replies:     m.ReplyCount,
 		Files:       append(files(m.Files), linkedImages(m.Blocks, m.Attachments)...),
 		Attachments: append(calls(m.Blocks), attachments(m.Attachments)...),
@@ -337,7 +338,13 @@ func (b *Backend) message(ctx context.Context, m slack.Msg) chat.Message {
 	}
 }
 
-// calls are the cards for zoom meetings and others: what to click to join until the call ends
+func withRoot(m chat.Message, root *slack.Msg) chat.Message {
+	if root != nil {
+		m.Root = root.Text
+	}
+	return m
+}
+
 func calls(blocks slack.Blocks) []chat.Attachment {
 	var out []chat.Attachment
 	for _, b := range blocks.BlockSet {
@@ -361,10 +368,8 @@ func calls(blocks slack.Blocks) []chat.Attachment {
 	return out
 }
 
-// slack's names for attachment colors
 var attachmentColors = map[string]string{"good": "#2eb67d", "warning": "#ecb22e", "danger": "#e01e5a"}
 
-// botName is an app's name, looked up once per app
 func (b *Backend) botName(ctx context.Context, id string) string {
 	b.mu.Lock()
 	name, ok := b.bots[id]
@@ -374,7 +379,7 @@ func (b *Backend) botName(ctx context.Context, id string) string {
 	}
 	bot, err := b.api.GetBotInfoContext(ctx, slack.GetBotInfoParameters{Bot: id})
 	if err != nil {
-		log.Printf("bots.info %s: %v", id, err) // and stays nameless rather than asking for every message
+		log.Printf("bots.info %s: %v", id, err) // cache the empty name so we don't ask again for every message
 	} else {
 		name = bot.Name
 	}
@@ -384,7 +389,6 @@ func (b *Backend) botName(ctx context.Context, id string) string {
 	return name
 }
 
-// linkedImages are images a message links to instead of an upload
 func linkedImages(blocks slack.Blocks, atts []slack.Attachment) []chat.File {
 	var out []chat.File
 	add := func(u, name string, w, h int) {
@@ -392,7 +396,7 @@ func linkedImages(blocks slack.Blocks, atts []slack.Attachment) []chat.File {
 			return
 		}
 		if w <= 0 || h <= 0 {
-			w, h = 320, 240 // image blocks don't say, and the image is fit inside
+			w, h = 320, 240 // image blocks have no size, so the image is fit inside this box
 		}
 		sum := sha1.Sum([]byte(u))
 		f := chat.File{ID: "link-" + hex.EncodeToString(sum[:8]), Name: cmp.Or(name, "image"), URL: u, Thumb: u, ThumbW: w, ThumbH: h, Mime: "image/jpeg"}
@@ -517,8 +521,7 @@ func (b *Backend) Mark(ctx context.Context, channel string, ts chat.TS) error {
 	return retry(ctx, func() error { return b.api.MarkConversationContext(ctx, channel, string(ts)) })
 }
 
-// MarkThread calls subscriptions.thread.mark, which slack doesn't document
-// but accepts from a user token
+// subscriptions.thread.mark is undocumented, but slack accepts it from a user token.
 func (b *Backend) MarkThread(ctx context.Context, channel string, thread, ts chat.TS) error {
 	form := url.Values{"channel": {channel}, "thread_ts": {string(thread)}, "ts": {string(ts)}, "read": {"1"}}
 	return retry(ctx, func() error {
@@ -547,10 +550,10 @@ func (b *Backend) MarkThread(ctx context.Context, channel string, thread, ts cha
 
 func (b *Backend) Download(ctx context.Context, url string, w io.Writer) error {
 	if !slackHosted(url) {
-		return fetch(ctx, url, w) // without the token, which is for Slack alone
+		return fetch(ctx, url, w) // the token must never go to another host
 	}
 	err := b.api.GetFileContext(ctx, url, w)
-	// if we don't have files:read slack will send us to the sign in page
+	// Without files:read, slack redirects to its sign-in page.
 	if err != nil && strings.Contains(err.Error(), "sign-in page") {
 		return errors.New("the token can't read files: add the files:read scope and reinstall the Slack app")
 	}
@@ -562,7 +565,6 @@ func slackHosted(raw string) bool {
 	return err == nil && u.Scheme == "https" && (u.Host == "slack.com" || strings.HasSuffix(u.Host, ".slack.com"))
 }
 
-// maxFetch bounds an image fetched from outside slack
 const maxFetch = 32 << 20
 
 func fetch(ctx context.Context, url string, w io.Writer) error {
@@ -591,7 +593,7 @@ func (b *Backend) Replies(ctx context.Context, channel string, thread chat.TS) (
 			return nil, fmt.Errorf("conversations.replies: %w", err)
 		}
 		for _, m := range page {
-			out = append(out, b.message(ctx, m.Msg))
+			out = append(out, withRoot(b.message(ctx, m.Msg), m.Root))
 		}
 		if !more || cursor == "" {
 			return out, nil
@@ -667,7 +669,6 @@ func (b *Backend) handle(client *socketmode.Client, ev socketmode.Event, emit fu
 	}
 }
 
-// for debug
 func describe(ev socketmode.Event) string {
 	api, ok := ev.Data.(slackevents.EventsAPIEvent)
 	if !ok {
@@ -706,11 +707,8 @@ func (b *Backend) messageEvent(m *slackevents.MessageEvent) chat.Event {
 		if m.Message == nil {
 			return nil
 		}
-		msg := b.message(context.Background(), *m.Message) // the whole event, as slackevents copies it here
-		if m.SubType == "thread_broadcast" {
-			msg.ThreadTS = ""
-		}
-		return chat.Posted{Channel: m.Channel, Msg: msg}
+		// slackevents copies the whole event into Message, even for a plain post.
+		return chat.Posted{Channel: m.Channel, Msg: withRoot(b.message(context.Background(), *m.Message), m.Root)}
 	}
 	return nil
 }

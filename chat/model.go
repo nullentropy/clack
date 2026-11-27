@@ -15,8 +15,8 @@ type ChannelKind int
 const (
 	Public ChannelKind = iota
 	Private
-	Group  // multi-person direct message
-	Direct // one-to-one direct message
+	Group // multi-person direct message
+	Direct
 )
 
 func (k ChannelKind) IsDM() bool { return k == Group || k == Direct }
@@ -35,12 +35,11 @@ type User struct {
 	Name        string
 	RealName    string
 	Avatar      string
-	Status      string    // the status they set, "" for none
-	StatusEmoji string    // by slack name, ":palm_tree:"
+	Status      string
+	StatusEmoji string    // slack name, such as ":palm_tree:"
 	StatusUntil time.Time // when slack clears the status, zero for never
 }
 
-// StatusLine is a user's status in one line
 func (u User) StatusLine(now time.Time) string {
 	if !u.StatusUntil.IsZero() && !now.Before(u.StatusUntil) {
 		return ""
@@ -48,7 +47,6 @@ func (u User) StatusLine(now time.Time) string {
 	return strings.TrimSpace(u.StatusEmoji + " " + u.Status)
 }
 
-// Display is the name shown on messages
 func (u User) Display() string {
 	if u.RealName != "" {
 		return u.RealName
@@ -56,7 +54,7 @@ func (u User) Display() string {
 	return u.Name
 }
 
-// TS is a Slack message timestamp ("1700000000.000100")
+// TS is a Slack message timestamp, such as "1700000000.000100".
 type TS string
 
 func (t TS) Time() time.Time {
@@ -71,41 +69,42 @@ func TSFromTime(t time.Time) TS {
 }
 
 type Message struct {
-	TS          TS
-	User        string // user ID (empty for bots, they have Username instead)
-	Username    string
-	Text        string // Slack mrkdwn
-	ThreadTS    TS
-	Replies     int
+	TS       TS
+	User     string // empty for bots, which have Username instead
+	Username string
+	Text     string // Slack mrkdwn
+	ThreadTS TS
+	Replies  int
+	// Broadcast is set on a thread reply that was also sent to the channel.
+	Broadcast bool
+	// Root is the parent's text on a broadcast, or "" when slack didn't send it.
+	Root        string
 	Files       []File
 	Attachments []Attachment
 	Reactions   []Reaction
 
-	// not a real message (joins, parts, etc)
-	System bool
-	// the user sent it and slack hasn't acked
+	System  bool // joins, leaves and other events that aren't messages
 	Pending bool
 
 	ReplyUsers []string
 	NewReplies int
 }
 
-// Reaction is one emoji on a message by the slack name
 type Reaction struct {
-	Name  string
+	Name  string // the emoji's slack name
 	Users []string
 }
 
-// Equal reports if two messages would render the same
+// Equal reports whether two messages render the same.
 func (m Message) Equal(o Message) bool {
 	return m.TS == o.TS && m.System == o.System && m.Pending == o.Pending && m.User == o.User && m.Username == o.Username && m.Text == o.Text &&
-		m.ThreadTS == o.ThreadTS && m.Replies == o.Replies && m.NewReplies == o.NewReplies && slices.Equal(m.Files, o.Files) && slices.Equal(m.Attachments, o.Attachments) &&
+		m.ThreadTS == o.ThreadTS && m.Broadcast == o.Broadcast && m.Root == o.Root && m.Replies == o.Replies && m.NewReplies == o.NewReplies && slices.Equal(m.Files, o.Files) && slices.Equal(m.Attachments, o.Attachments) &&
 		slices.EqualFunc(m.Reactions, o.Reactions, func(a, b Reaction) bool {
 			return a.Name == b.Name && slices.Equal(a.Users, b.Users)
 		})
 }
 
-// Attachment is a card an app puts under a message and link previews
+// Attachment is an app's card under a message, or a link preview.
 type Attachment struct {
 	Color   string // "#rrggbb", or "" for the default
 	Pretext string // Slack mrkdwn, as are Title and Text
@@ -113,7 +112,6 @@ type Attachment struct {
 	Text    string
 }
 
-// File is an attachment
 type File struct {
 	ID     string
 	Name   string
@@ -123,32 +121,28 @@ type File struct {
 	Thumb  string
 	ThumbW int
 	ThumbH int
-	Anim   string // an animated preview, for GIFs
+	Anim   string
 	Err    string // why the preview couldn't be fetched
 }
 
 func (f File) Animated() bool { return f.Mime == "image/gif" }
 
-// IsImage reports if the file has a preview to show inline
 func (f File) IsImage() bool { return strings.HasPrefix(f.Mime, "image/") && f.Thumb != "" }
 
-// IsReply reports if the message is inside a thread
 func (m Message) IsReply() bool { return m.ThreadTS != "" && m.ThreadTS != m.TS }
 
-// Hit is a message a search found
 type Hit struct {
 	Channel string
 	Msg     Message
 }
 
-// Snapshot is what a backend knows at startup
 type Snapshot struct {
 	Team              string
 	TeamID            string
 	Self              string
 	Users             []User
 	Channels          []Channel
-	Away              bool // the user set themselves away
+	Away              bool // set by the user, not automatic
 	Groups            []UserGroup
 	GroupsUnavailable bool
 }
@@ -160,7 +154,6 @@ type UserGroup struct {
 	Members []string
 }
 
-// Event is a change a backend observed after startup
 type Event interface{ event() }
 
 type Posted struct {
@@ -190,12 +183,10 @@ type ChannelChanged struct {
 	Channel Channel
 }
 
-// UserChanged is a user's new profile, their status included
 type UserChanged struct {
 	User User
 }
 
-// PresenceChanged is whether a user is away
 type PresenceChanged struct {
 	User string
 	Away bool
@@ -225,44 +216,30 @@ func (PresenceChanged) event() {}
 
 type Backend interface {
 	Bootstrap(ctx context.Context) (Snapshot, error)
-	// History returns the channel's most recent messages, oldest first
+	// History returns the most recent messages, oldest first.
 	History(ctx context.Context, channel string) ([]Message, error)
-	// Replies returns a thread: its parent, then the replies oldest first
+	// Replies returns the parent, then the replies oldest first.
 	Replies(ctx context.Context, channel string, thread TS) ([]Message, error)
-	// Send posts to the channel or thread and returns the new message's timestamp
 	Send(ctx context.Context, channel string, thread TS, text string) (TS, error)
-	// Edit replaces the text of one of the user's own messages
 	Edit(ctx context.Context, channel string, ts TS, text string) error
-	// React adds the user's reaction, by emoji name, to a message
 	React(ctx context.Context, channel string, ts TS, name string) error
-	// Members lists the users in a conversation
 	Members(ctx context.Context, channel string) ([]string, error)
-	// Search finds messages matching a slack search query, best first
+	// Search returns the best matches first.
 	Search(ctx context.Context, query string) ([]Hit, error)
-	// SetTopic changes a channel's topic
 	SetTopic(ctx context.Context, channel, topic string) error
-	// SetAway sets the user away, or back to automatic presence
+	// SetAway(false) returns the user to automatic presence.
 	SetAway(ctx context.Context, away bool) error
 	SetStatus(ctx context.Context, text string) error
-	// Presence reports whether another user is away
 	Presence(ctx context.Context, user string) (away bool, err error)
-	// Upload posts a file to the channel, or into a thread when thread is set
 	Upload(ctx context.Context, channel string, thread TS, name string, data []byte) error
-	// ReadCursor is where the user has read up to in the conversation in
-	// slack, or "" when it doesn't say
+	// ReadCursor returns "" when slack doesn't say.
 	ReadCursor(ctx context.Context, channel string) (TS, error)
-	// Info describes a channel the user is in
 	Info(ctx context.Context, channel string) (Channel, error)
-	// Join joins the public channel called name
 	Join(ctx context.Context, name string) (Channel, error)
-	// OpenDM starts or finds the direct message with a user
 	OpenDM(ctx context.Context, user string) (Channel, error)
-	// Download writes a file's content, from one of its URLs, to w
 	Download(ctx context.Context, url string, w io.Writer) error
-	// Mark moves the user's read cursor in the channel to ts
 	Mark(ctx context.Context, channel string, ts TS) error
-	// MarkThread moves the user's read cursor in a thread to the reply at ts
 	MarkThread(ctx context.Context, channel string, thread, ts TS) error
-	// Listen blocks, reporting live events until ctx ends
+	// Listen blocks until ctx ends.
 	Listen(ctx context.Context, emit func(Event)) error
 }

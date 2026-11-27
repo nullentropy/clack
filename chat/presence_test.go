@@ -67,7 +67,6 @@ func TestSetAwayRevertsWhenSlackRefuses(t *testing.T) {
 	}
 }
 
-// next is the next presence the store set, failing after a second.
 func next(t *testing.T, presence chan bool) bool {
 	t.Helper()
 	select {

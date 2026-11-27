@@ -11,14 +11,14 @@ import (
 )
 
 type sideRow struct {
-	key     string // channel ID
-	num     int    // for alt+N, counting from 1
+	key     string
+	num     int // for alt+N, counting from 1
 	label   string
 	unread  bool
-	mention bool // an unread message names the user
+	mention bool
 	current bool
-	away    bool   // the person in a direct message is away
-	tip     string // shown on hover
+	away    bool
+	tip     string
 }
 
 type sidebar struct {

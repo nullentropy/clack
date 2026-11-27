@@ -17,12 +17,11 @@ import (
 	"github.com/nullentropy/clack/chat"
 )
 
-// caution decodes a GIF to its first frame, so clack decodes the frames
-// itself, serves each as a PNG at /files/<id>?frame=N, and steps the image
-// through them
+// caution decodes only a GIF's first frame, so clack decodes the frames itself,
+// serves each as a PNG at /files/<id>?frame=N, and steps the image through them.
 
-// gifPixels bounds the pixels across one GIF's frames, which the client
-// keeps as textures: 16M is 64MB of RGBA. Longer GIFs drop frames evenly
+// gifPixels bounds the pixels across one GIF's frames, because the client keeps
+// them as textures: 16M is 64MB of RGBA. Longer GIFs drop frames evenly.
 const gifPixels = 16 << 20
 
 type animation struct {
@@ -30,8 +29,8 @@ type animation struct {
 	delays []time.Duration
 }
 
-// decodeGIF composites each frame over the ones before it, as the GIF's
-// disposal methods say, since later frames are often only the part that changed
+// decodeGIF composites each frame over the earlier ones, as the disposal
+// methods say, because later frames often hold only the part that changed.
 func decodeGIF(data []byte) (*animation, error) {
 	g, err := gif.DecodeAll(bytes.NewReader(data))
 	if err != nil {
@@ -82,8 +81,8 @@ func decodeGIF(data []byte) (*animation, error) {
 	return a, nil
 }
 
-// gifCache keeps the last few decoded GIFs, so every window and every frame
-// request shares one download and decode
+// gifCache keeps the last few decoded GIFs so that every window and every frame
+// request shares one download and decode.
 type gifCache struct {
 	mu    sync.Mutex
 	byKey map[string]*gifEntry
@@ -153,7 +152,6 @@ func (a *app) serveFrame(ctx context.Context, store *chat.Store, id string, full
 	return anim.frames[n], nil
 }
 
-// animate steps img through a GIF's frames until img leaves the window
 func (w *window) animate(img *caution.Node, f chat.File, full bool) {
 	if w.s == nil || w.app == nil || !f.Animated() {
 		return

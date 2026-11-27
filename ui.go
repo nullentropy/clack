@@ -20,66 +20,60 @@ import (
 )
 
 const (
-	// consecutive messages from one author within this window share a nick
 	groupWindow = 5 * time.Minute
 
 	fontSize    = 13
 	lineHeight  = 18
 	threadWidth = 480
 
-	// the nick column fits the longest name in the buffer
 	nickWidth   = 140
 	threadNick  = 120
 	monoAdvance = 0.6 * fontSize
 
-	// image previews fit within these
 	imageW       = 360
 	imageH       = 270
 	threadImageW = 240
 
-	// statusKey names the status buffer
 	statusKey = "status"
 )
 
-// target is where a composer posts
 type target struct {
 	channel string
 	thread  chat.TS
 }
 
-// window is one session's view of the store
 type window struct {
-	s           *caution.Session
-	store       *chat.Store
-	quit        func()
-	tokens      func()      // opens the settings screen
-	app         *app        // for settings
-	focused     func() bool // whether the window has the user's attention
-	unsubscribe func()
-	changesMu   sync.Mutex
-	changes     []chat.Change // waiting for the session goroutine
-	changesKick chan struct{}
+	s            *caution.Session
+	store        *chat.Store
+	quit         func()
+	openSettings func()
+	app          *app
+	focused      func() bool
+	unsubscribe  func()
+	changesMu    sync.Mutex
+	changes      []chat.Change // drained on the session goroutine
+	changesKick  chan struct{}
 
 	showing chan struct{}
 	closed  bool
 	parked  map[*caution.Node]parkedGIF
 
 	backdrop *caution.Node
-	backFrag string // what backdrop shows, "" for nothing
+	backFrag string
 	shimmer  bool
 
 	menu        func()
 	menuBuffers []string
 
-	active     string                    // a channel ID, or statusKey
-	newSince   chat.TS                   // the read cursor when active opened with unread messages
-	notes      []statusEntry             // lines commands added to the status buffer
-	local      map[string][]chat.Message // command output in other buffers, shown only here
-	statusTo   map[chat.TS]string        // status buffer messages, by TS, to the channel each opens
-	cleared    map[string]chat.TS        // per buffer, the last message /clear hid
+	active     string  // a channel ID, or statusKey
+	newSince   chat.TS // the read cursor when active opened with unread messages
+	notes      []statusEntry
+	local      map[string][]chat.Message // command output, never sent to slack
+	statusTo   map[chat.TS]string        // the channel each status buffer line opens
+	cleared    map[string]chat.TS        // the last message /clear hid, per buffer
 	subtitle   string
 	shownTitle string
-	drafts     map[target]string // unsent composer text, per channel or thread
+	drafts     map[target]string
 	sidebar    *sidebar
 	title      *caution.Node
 	status     *caution.Node
@@ -87,25 +81,24 @@ type window struct {
 	composer   *caution.Node
 	root       *caution.Node
 
-	thread         target        // zero while no thread is open
-	content        *caution.Node // the timeline, and the thread beside it while one is open
+	thread         target // zero while no thread is open
+	content        *caution.Node
 	threadView     *caution.Node
 	threadChannel  *caution.Node
 	threadLog      *logView
 	threadComposer *caution.Node
 
 	overlay     *caution.Node
-	fitOverlay  func(width, height float64) // resizes the overlay with the window, when it should
-	dropHint    *caution.Node               // shown while files are dragged over the window
+	fitOverlay  func(width, height float64)
+	dropHint    *caution.Node
 	toasts      *caution.Node
 	toastCorner string
-	threadW     float64 // the thread pane's width
+	threadW     float64
 }
 
-// newWindow makes sc's view of store
 func newWindow(sc *screen, store *chat.Store) *window {
 	s := sc.s
-	w := &window{s: s, store: store, changesKick: make(chan struct{}, 1), app: sc.a, quit: sc.a.quit, tokens: sc.askTokens, menu: sc.setMenu, focused: sc.isFocused,
+	w := &window{s: s, store: store, changesKick: make(chan struct{}, 1), app: sc.a, quit: sc.a.quit, openSettings: sc.askTokens, menu: sc.setMenu, focused: sc.isFocused,
 		drafts: sc.a.takeDrafts()}
 	w.renderTitle()
 
@@ -201,8 +194,8 @@ func headerBar(kids ...*caution.Node) *caution.Node {
 	)
 }
 
-// queueChange runs on the goroutine reading slack events, which can't wait
-// for any ui stuff so we don't hold up acks (slack sends again when there's no ack)
+// queueChange runs on the goroutine reading slack events. It must not wait on
+// the UI, because a late ack makes slack send the event again.
 func (w *window) queueChange(c chat.Change) {
 	w.changesMu.Lock()
 	if !slices.Contains(w.changes, c) {
@@ -295,7 +288,7 @@ func (w *window) open(id string) {
 	w.composer.Focus()
 }
 
-// markRead clears what the user can see, once the window has their attention
+// markRead does nothing until the window has the user's attention.
 func (w *window) markRead() {
 	switch {
 	case !w.focused():
@@ -424,6 +417,9 @@ func (w *window) spanClick(action string) {
 		w.open(ref)
 	case "file":
 		w.download(ref)
+	case "thread":
+		channel, ts, _ := strings.Cut(ref, "/")
+		w.openThread(channel, chat.TS(ts))
 	}
 }
 
@@ -516,7 +512,6 @@ func (w *window) post(to target, text string) {
 
 const maxLocal = 50
 
-// notice adds a line just for the user
 func (w *window) notice(text string) {
 	if w.active == statusKey || w.active == "" {
 		w.note(text)
@@ -607,7 +602,7 @@ func (w *window) channelLabel(c chat.Channel) string {
 	return "#" + c.Name
 }
 
-// presenceLine says whether a user is away and what status they set, "" for neither
+// presenceLine is "" when the user is neither away nor has a status.
 func (w *window) presenceLine(id string) string {
 	if id == "" {
 		return ""
@@ -769,7 +764,6 @@ func (v *logView) sync(key string, msgs []chat.Message, empty string) *caution.N
 	return v.add(msgs, 0)
 }
 
-// restyle redraws the rows a user wrote, after their presence or status changed
 func (v *logView) restyle(user string) {
 	for i, m := range v.shown {
 		if m.User == user {
@@ -881,6 +875,9 @@ func (w *window) messageRow(m chat.Message, prev *chat.Message, nickW float64, r
 	}
 
 	var lines []*caution.Node
+	if replies && m.Broadcast {
+		lines = append(lines, w.broadcastLine(w.active, m))
+	}
 	color := "$ink"
 	if isNote(m) || m.System || m.Pending {
 		color = "$inkDim"
@@ -930,6 +927,29 @@ func (w *window) messageRow(m chat.Message, prev *chat.Message, nickW float64, r
 	).Tip(m.TS.Time().Format("Monday, January 2 at 15:04"))
 }
 
+func (w *window) broadcastLine(channel string, m chat.Message) *caution.Node {
+	text := "replied to a thread"
+	if root := snippet(chat.Plain(m.Root, w.userName, w.channelName)); root != "" {
+		text += ": " + root
+	}
+	return caution.Panel().H(lineHeight).Clips().Kids(
+		w.richText([]caution.Span{{Text: text, Mono: true, Color: "$inkFaint", Action: "thread:" + channel + "/" + string(m.ThreadTS)}}, "$inkFaint").
+			Anchor(caution.A{Left: caution.Px(0), Right: caution.Px(0), Top: caution.Px(0)}))
+}
+
+const snippetChars = 80
+
+func snippet(text string) string {
+	text, _, cut := strings.Cut(strings.TrimSpace(text), "\n")
+	if r := []rune(text); len(r) > snippetChars {
+		text, cut = string(r[:snippetChars]), true
+	}
+	if cut {
+		return strings.TrimRight(text, " ") + "…"
+	}
+	return text
+}
+
 func (w *window) card(a chat.Attachment) *caution.Node {
 	var runs []chat.Run
 	for _, part := range []struct {
@@ -960,7 +980,7 @@ func (w *window) card(a chat.Attachment) *caution.Node {
 	return caution.VStack().Gap(2).Align("stretch").Kids(append(w.body(chat.Format(a.Pretext, w.userName, w.channelName), "$ink"), card)...)
 }
 
-// cardLines and cardChars bound a card's text, as slack folds long ones
+// cardLines and cardChars match where slack folds a long card.
 const (
 	cardLines = 6
 	cardChars = 600

@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// Away returns true if the user is set away in slack
 func (s *Store) Away() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.away }
 
 func (s *Store) SetAway(ctx context.Context, away bool) error {
@@ -84,7 +83,7 @@ func (s *Store) remember(text string) {
 	}
 }
 
-// 0 to turn off autoaway
+// AutoAway is zero when auto away is off.
 func (s *Store) AutoAway() time.Duration { s.mu.Lock(); defer s.mu.Unlock(); return s.autoAway }
 func (s *Store) AutoBack() bool          { s.mu.Lock(); defer s.mu.Unlock(); return s.autoBack }
 
@@ -101,14 +100,12 @@ func (s *Store) SetAutoBack(on bool) {
 	s.autoBack = on
 }
 
-// Activity restarts the idle countdown
 func (s *Store) Activity() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.resetIdleLocked()
 }
 
-// Typed is when the user is typing which also counts towards activity
 func (s *Store) Typed() {
 	s.mu.Lock()
 	s.resetIdleLocked()
@@ -140,10 +137,10 @@ func (s *Store) autoSet(away bool) {
 
 type presence struct {
 	away    bool
-	checked time.Time // zero until polled
+	checked time.Time
 }
 
-// UserAway reports whether a user is away, as of the last poll
+// UserAway is as of the last poll.
 func (s *Store) UserAway(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -153,8 +150,8 @@ func (s *Store) UserAway(id string) bool {
 	return s.presence[id].away
 }
 
-// slack's Events API never sends presence so we poll
-// they allow about 50 calls a minute, we make 40
+// Slack's Events API never sends presence, so we poll. Slack allows about 50
+// calls a minute and this makes 40.
 const (
 	presenceEvery = 15 * time.Second
 	presenceBatch = 10
@@ -173,7 +170,6 @@ func (s *Store) pollPresence(ctx context.Context) {
 	}
 }
 
-// checkPresence asks slack about the watched users it checked longest ago
 func (s *Store) checkPresence(ctx context.Context) {
 	for _, id := range s.stalest(presenceBatch) {
 		away, err := s.backend.Presence(ctx, id)
@@ -206,8 +202,6 @@ func (s *Store) stalest(n int) []string {
 	return ids[:min(n, len(ids))]
 }
 
-// watchedLocked is who the user can see: the people in their open direct
-// messages and the authors in the buffer they have open
 func (s *Store) watchedLocked() map[string]bool {
 	out := map[string]bool{}
 	for id, c := range s.channels {

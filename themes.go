@@ -8,7 +8,6 @@ import (
 	"strings"
 )
 
-// nickColors is how many nick colors a theme has
 const nickColors = 16
 
 var themes = map[string]map[string]string{
@@ -52,7 +51,6 @@ var themes = map[string]map[string]string{
 
 const defaultTheme = "dark"
 
-// every opaque color gets an Away variant, faded for people who are away
 func init() {
 	for _, t := range themes {
 		for k, v := range maps.Clone(t) {
@@ -63,7 +61,6 @@ func init() {
 	}
 }
 
-// faded is a theme color as it's shown for someone away
 func faded(color string) string { return color + "Away" }
 
 func themeNames() []string { return slices.Sorted(maps.Keys(themes)) }

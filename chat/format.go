@@ -84,8 +84,8 @@ func entity(body string, user func(string) string, channel func(string) string) 
 	return strings.TrimPrefix(html.UnescapeString(ref), "mailto:")
 }
 
-// date renders a "!date^1700000000^{date_short} at {time}" reference in
-// local time, with clack's 24 hour clock
+// date renders a reference like "!date^1700000000^{date_short} at {time}"
+// in local time on a 24 hour clock.
 func date(ref string, now time.Time) (string, bool) {
 	parts := strings.Split(ref, "^")
 	if len(parts) < 3 {
@@ -121,17 +121,16 @@ func date(ref string, now time.Time) (string, bool) {
 	).Replace(parts[2]), true
 }
 
-// Run is a stretch of message text in one style. a Pre run is a code block
+// A Pre run is a code block.
 type Run struct {
 	Text                       string
 	Bold, Italic, Strike, Code bool
 	Pre                        bool
-	Link                       string // a web address the run opens
-	User                       string // the ID of a mentioned user
-	Channel                    string // the ID of a mentioned channel
+	Link                       string
+	User                       string // ID
+	Channel                    string // ID
 }
 
-// Format parses Slack mrkdwn into styled runs
 func Format(text string, user func(id string) string, channel func(id string) string) []Run {
 	f := formatter{user: user, channel: channel}
 	for {
@@ -158,7 +157,6 @@ type formatter struct {
 	out           []Run
 }
 
-// add appends text in style, joining it to the previous run when they match
 func (f *formatter) add(text string, style Run) {
 	if text == "" {
 		return
@@ -176,8 +174,8 @@ func (f *formatter) add(text string, style Run) {
 }
 
 func (f *formatter) inline(s string, style Run) {
-	plain := 0 // start of text not yet added
-	flush := func(end int) { f.add(html.UnescapeString(s[plain:end]), style) }
+	unflushed := 0
+	flush := func(end int) { f.add(html.UnescapeString(s[unflushed:end]), style) }
 	for i := 0; i < len(s); {
 		switch c := s[i]; c {
 		case '<':
@@ -185,7 +183,7 @@ func (f *formatter) inline(s string, style Run) {
 				flush(i)
 				f.entity(s[i+1:i+end], style)
 				i += end + 1
-				plain = i
+				unflushed = i
 				continue
 			}
 		case '`':
@@ -195,11 +193,11 @@ func (f *formatter) inline(s string, style Run) {
 				code.Code = true
 				f.add(html.UnescapeString(s[i+1:i+1+end]), code)
 				i += end + 2
-				plain = i
+				unflushed = i
 				continue
 			}
 		case '*', '_', '~':
-			if end := closer(s, i); end > 0 {
+			if end := closingMark(s, i); end > 0 {
 				flush(i)
 				inner := style
 				switch c {
@@ -212,7 +210,7 @@ func (f *formatter) inline(s string, style Run) {
 				}
 				f.inline(s[i+1:end], inner)
 				i = end + 1
-				plain = i
+				unflushed = i
 				continue
 			}
 		}
@@ -221,10 +219,9 @@ func (f *formatter) inline(s string, style Run) {
 	flush(len(s))
 }
 
-// closer finds the mark that closes the one at s[i]
-func closer(s string, i int) int {
+func closingMark(s string, i int) int {
 	c := s[i]
-	if i > 0 && (!edge(s[i-1]) || s[i-1] == '\\') {
+	if i > 0 && (!canBorderMark(s[i-1]) || s[i-1] == '\\') {
 		return -1
 	}
 	if i+1 >= len(s) || s[i+1] == ' ' || s[i+1] == '\n' || s[i+1] == c {
@@ -234,15 +231,14 @@ func closer(s string, i int) int {
 		switch {
 		case s[j] == '\n':
 			return -1
-		case s[j] == c && s[j-1] != ' ' && (j+1 == len(s) || edge(s[j+1])):
+		case s[j] == c && s[j-1] != ' ' && (j+1 == len(s) || canBorderMark(s[j+1])):
 			return j
 		}
 	}
 	return -1
 }
 
-// edge reports whether b can sit beside a formatting mark
-func edge(b byte) bool {
+func canBorderMark(b byte) bool {
 	return b < 0x80 && !('a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || '0' <= b && b <= '9')
 }
 

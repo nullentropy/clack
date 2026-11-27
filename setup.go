@@ -22,8 +22,6 @@ import (
 	"github.com/nullentropy/clack/slackapi"
 )
 
-// configDir is where clack keeps its settings and open lists
-// $XDG_CONFIG_HOME/clack, or ~/.config/clack.
 func configDir() string {
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
 		return filepath.Join(d, "clack")
@@ -38,16 +36,16 @@ func configDir() string {
 type settings struct {
 	UserToken   string `json:"user_token"`
 	AppToken    string `json:"app_token"`
-	AutoAway    string `json:"auto_away,omitempty"` // idle time before going away, such as "10m"; empty is never
-	AutoBack    bool   `json:"auto_back,omitempty"` // typing while away comes back
-	Quiet       bool   `json:"quiet,omitempty"`     // no notifications
+	AutoAway    string `json:"auto_away,omitempty"` // a duration such as "10m"; empty is never
+	AutoBack    bool   `json:"auto_back,omitempty"`
+	Quiet       bool   `json:"quiet,omitempty"`
 	ToastCorner string `json:"toast_corner,omitempty"`
-	Theme       string `json:"theme,omitempty"`      // one of themes; empty is the default
-	Effect      string `json:"effect,omitempty"`     // one of effects; empty is none
-	FXPing      bool   `json:"fx_ping,omitempty"`    // glitch the window when a DM or mention arrives
-	FXShimmer   bool   `json:"fx_shimmer,omitempty"` // color sweeps through messages that mention the user
-	FXSidebar   bool   `json:"fx_sidebar,omitempty"` // animated sidebar background
-	WindowW     int    `json:"window_w,omitempty"`   // restored window size in logical px
+	Theme       string `json:"theme,omitempty"`  // empty is the default
+	Effect      string `json:"effect,omitempty"` // empty is none
+	FXPing      bool   `json:"fx_ping,omitempty"`
+	FXShimmer   bool   `json:"fx_shimmer,omitempty"`
+	FXSidebar   bool   `json:"fx_sidebar,omitempty"`
+	WindowW     int    `json:"window_w,omitempty"` // logical px, as is WindowH
 	WindowH     int    `json:"window_h,omitempty"`
 	Maximized   bool   `json:"maximized,omitempty"`
 	UpdatesOff  bool   `json:"updates_off,omitempty"`
@@ -87,7 +85,7 @@ func tilde(path string) string {
 type app struct {
 	dir   string
 	quit  func()
-	debug bool // log Slack's live events
+	debug bool
 
 	trafficLights bool
 	appMenu       bool
@@ -97,13 +95,13 @@ type app struct {
 
 	mu         sync.Mutex
 	store      *chat.Store
-	stop       context.CancelFunc // ends store's live events
+	stop       context.CancelFunc
 	connecting bool
-	err        string // why the latest attempt failed
-	gen        int    // connections made so far
+	err        string
+	gen        int
 	subs       map[int]func()
 	nextSub    int
-	focused    map[*screen]bool // sessions whose window has focus
+	focused    map[*screen]bool
 	onChat     map[*screen]bool
 	screens    map[*screen]bool
 
@@ -151,7 +149,6 @@ func (a *app) watching() []*screen {
 	return scs
 }
 
-// conn is a snapshot of the app's connection state
 type conn struct {
 	store      *chat.Store
 	connecting bool
@@ -384,11 +381,11 @@ type screen struct {
 	focused  bool
 	asked    bool
 	askedGen int
-	fx       *caution.Node // the node carrying the effect
+	fx       *caution.Node
 	fxKey    string
-	effect   string     // the window effect's name
-	bg       [3]float64 // the theme background, which the effect composites over
-	glitchAt time.Time  // when the latest ping glitch started, zero when none is running
+	effect   string
+	bg       [3]float64 // the effect composites over this
+	glitchAt time.Time  // zero when no glitch is running
 
 	menuSet bool
 	menuSig string
@@ -407,7 +404,6 @@ func (sc *screen) refresh() {
 	sc.setMenu()
 }
 
-// applyEffect puts the chosen effects on the root and the window
 func (sc *screen) applyEffect() {
 	cfg, theme := sc.a.fx(), sc.a.theme()
 	if sc.win != nil {
@@ -427,7 +423,7 @@ func (sc *screen) applyEffect() {
 	sc.root.Effect(fx)
 }
 
-// glitchLeft is the ping glitch's strength, 1 as it starts down to 0
+// glitchLeft falls from 1 to 0 over the glitch.
 func (sc *screen) glitchLeft() float64 {
 	if sc.glitchAt.IsZero() {
 		return 0
@@ -435,7 +431,6 @@ func (sc *screen) glitchLeft() float64 {
 	return max(0, 1-float64(time.Since(sc.glitchAt))/float64(glitchFor))
 }
 
-// glitch runs the ping glitch, restarting it when one is already running
 func (sc *screen) glitch() {
 	if !sc.focused {
 		return
@@ -462,7 +457,7 @@ func (sc *screen) glitch() {
 					sc.glitchAt = time.Time{}
 					sc.applyEffect()
 				} else {
-					sc.root.Effect(rootFX(sc.effect, sc.bg, g)) // effects take no uniform patches, so the whole effect goes again
+					sc.root.Effect(rootFX(sc.effect, sc.bg, g)) // caution can't patch one uniform, so the whole effect is set again
 				}
 				ended <- g == 0
 			})
@@ -524,7 +519,6 @@ type setupView struct {
 //go:embed slack-manifest.json
 var slackManifest []byte
 
-// newAppURL opens slack's create app page with the manifest filled in
 func newAppURL() string {
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, slackManifest); err != nil {
@@ -553,7 +547,7 @@ func newSetupView(a *app, cancel func()) *setupView {
 	}
 	heading := func(text string) *caution.Node { return caution.Label(text).FontSize(16).Weight(700) }
 	v.cancel = caution.Button("Close").OnClick(cancel)
-	// Close leaves the whole screen, so it ends the card. presence saves as it changes
+	// Close leaves the whole screen, so it goes last in the card. Presence settings save as they change.
 	v.cancelSlot = caution.HStack().Kids(caution.Panel().Fill(1))
 	v.form = caution.VStack().Gap(10).Align("stretch").Kids(
 		heading("Slack"),

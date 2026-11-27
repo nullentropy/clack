@@ -6,10 +6,9 @@ import (
 	"strings"
 )
 
-// Everywhere mutes someone in every channel but not in DMs
+// Everywhere mutes someone in every channel except DMs.
 const Everywhere = "*"
 
-// Mute hides user's messages in channel or everywhere
 func (s *Store) Mute(user, channel string) {
 	s.mu.Lock()
 	s.mute(user, channel)
@@ -18,15 +17,14 @@ func (s *Store) Mute(user, channel string) {
 	s.notify(Change{})
 }
 
-// Unmute shows user's messages in again
 func (s *Store) Unmute(user, channel string) {
 	s.mu.Lock()
 	if channel == Everywhere {
-		delete(s.muted, user)
-	} else if in := s.muted[user]; in != nil {
+		delete(s.mutedIn, user)
+	} else if in := s.mutedIn[user]; in != nil {
 		delete(in, channel)
 		if len(in) == 0 {
-			delete(s.muted, user)
+			delete(s.mutedIn, user)
 		}
 	}
 	s.saveLocked()
@@ -34,14 +32,13 @@ func (s *Store) Unmute(user, channel string) {
 	s.notify(Change{})
 }
 
-// Muted reports if user's messages are hidden in channel
 func (s *Store) Muted(channel, user string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.isMuted(channel, user)
 }
 
-// Mutes lists the channels each muted user is muted in
+// Mutes maps each muted user to the channels they are muted in.
 func (s *Store) Mutes() map[string][]string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -49,25 +46,25 @@ func (s *Store) Mutes() map[string][]string {
 }
 
 func (s *Store) mute(user, channel string) {
-	if s.muted[user] == nil {
-		s.muted[user] = map[string]bool{}
+	if s.mutedIn[user] == nil {
+		s.mutedIn[user] = map[string]bool{}
 	}
-	s.muted[user][channel] = true
+	s.mutedIn[user][channel] = true
 }
 
 func (s *Store) mutesLocked() map[string][]string {
-	if len(s.muted) == 0 {
+	if len(s.mutedIn) == 0 {
 		return nil
 	}
-	out := make(map[string][]string, len(s.muted))
-	for user, in := range s.muted {
+	out := make(map[string][]string, len(s.mutedIn))
+	for user, in := range s.mutedIn {
 		out[user] = slices.Sorted(maps.Keys(in))
 	}
 	return out
 }
 
 func (s *Store) isMuted(channel, user string) bool {
-	in := s.muted[user]
+	in := s.mutedIn[user]
 	if in[channel] {
 		return true
 	}

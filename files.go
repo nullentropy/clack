@@ -18,9 +18,7 @@ import (
 	"golang.org/x/image/webp"
 )
 
-// serveFile is /files/<id>
-//
-// preview by default or original with ?full
+// serveFile serves /files/<id>: the preview, or the original with ?full.
 func (a *app) serveFile(w http.ResponseWriter, r *http.Request) {
 	store := a.current()
 	if store == nil {
@@ -83,7 +81,6 @@ func displayable(data []byte) ([]byte, error) {
 	}
 }
 
-// saveFile downloads an attachment's original into dir
 func saveFile(ctx context.Context, store *chat.Store, id, dir string) (string, error) {
 	f, ok := store.File(id)
 	if !ok {

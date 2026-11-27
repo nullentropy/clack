@@ -125,7 +125,7 @@ func (w *window) command(to target, text string) bool {
 	case "close":
 		w.closeThread()
 	case "settings", "tokens":
-		w.tokens()
+		w.openSettings()
 	case "help":
 		w.showHelp()
 	default:
@@ -497,7 +497,6 @@ func (w *window) findChannel(arg string) (string, bool) {
 	return "", false
 }
 
-// let's you do s/typo/nottypo to your last message
 type subst struct {
 	pattern, repl string
 	global        bool

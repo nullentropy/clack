@@ -7,7 +7,6 @@ import (
 	"github.com/nullentropy/caution"
 )
 
-// bindDrops posts files dropped to the active conversation
 func (sc *screen) bindDrops() {
 	onWindow := func(fn func(w *window)) {
 		if sc.win != nil && sc.root == sc.win.root {
@@ -25,7 +24,6 @@ func (sc *screen) bindDrops() {
 	})
 }
 
-// dropTarget is the conversation under x
 func (w *window) dropTarget(x float64) target {
 	if w.thread.channel != "" && w.threadView.Parent() != nil {
 		if width, _ := w.s.Viewport(); x >= width-w.threadW {
@@ -55,7 +53,6 @@ func (w *window) upload(to target, files []caution.File) {
 	}
 }
 
-// dragHint dims the window while files are dragged over it
 func (w *window) dragHint(over bool) {
 	if w.dropHint != nil {
 		w.dropHint.Remove()

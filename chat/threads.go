@@ -10,10 +10,10 @@ func (s *Store) countReply(channel string, m Message) {
 	k := threadKey{channel, m.ThreadTS}
 	switch {
 	case m.User == s.snap.Self:
-		s.mine[k] = true
-		delete(s.newIn, k)
+		s.postedIn[k] = true
+		delete(s.unreadReplies, k)
 	case s.isMine(k):
-		s.newIn[k]++
+		s.unreadReplies[k]++
 		s.showParent(k)
 	default:
 		return
@@ -37,7 +37,7 @@ func (s *Store) showParent(k threadKey) {
 }
 
 func (s *Store) isMine(k threadKey) bool {
-	if s.mine[k] {
+	if s.postedIn[k] {
 		return true
 	}
 	i, ok := find(s.timeline[k.channel], k.ts)
@@ -51,14 +51,14 @@ func (s *Store) isMine(k threadKey) bool {
 func (s *Store) setNewReplies(k threadKey) {
 	s.update(k.channel, func(msgs []Message) []Message {
 		if i, ok := find(msgs, k.ts); ok {
-			msgs[i].NewReplies = s.newIn[k]
+			msgs[i].NewReplies = s.unreadReplies[k]
 		}
 		return msgs
 	})
 }
 
 func (s *Store) showNewReplies(channel string) {
-	for k := range s.newIn {
+	for k := range s.unreadReplies {
 		if k.channel == channel {
 			s.setNewReplies(k)
 		}
@@ -69,7 +69,7 @@ func (s *Store) NewReplies(channel string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := 0
-	for k, c := range s.newIn {
+	for k, c := range s.unreadReplies {
 		if k.channel == channel {
 			n += c
 		}
@@ -91,9 +91,9 @@ func (s *Store) MarkThreadRead(channel string, thread TS) {
 	if push {
 		s.threadSeen[k] = newest
 	}
-	cleared := s.newIn[k] != 0
+	cleared := s.unreadReplies[k] != 0
 	if cleared {
-		delete(s.newIn, k)
+		delete(s.unreadReplies, k)
 		s.setNewReplies(k)
 	}
 	s.mu.Unlock()

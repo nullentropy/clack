@@ -6,10 +6,8 @@ import (
 	"time"
 )
 
-// windowSettle is a window size debounce before we save the size
 const windowSettle = 500 * time.Millisecond
 
-// windowSaver saves the native window's size so we can reopen the same way
 type windowSaver struct {
 	a *app
 
@@ -30,7 +28,6 @@ func (ws *windowSaver) note(w, h int, maximized bool) {
 	ws.timer = time.AfterFunc(windowSettle, ws.flush)
 }
 
-// flush forces a save without debounce for when we quit
 func (ws *windowSaver) flush() {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -49,7 +46,6 @@ func (ws *windowSaver) flush() {
 	}
 }
 
-// windowSize is the size to open at
 func windowSize(s settings) (w, h int) {
 	if s.WindowW > 0 && s.WindowH > 0 {
 		return s.WindowW, s.WindowH

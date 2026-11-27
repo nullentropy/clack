@@ -18,56 +18,52 @@ import (
 	"time"
 )
 
-// Change is slack telling us that something in the workspace happened
-// Channel will be empty for things that aren't about a specific channel
-// User is set when a user's presence or status changed
+// Channel is empty when the change isn't about one channel. User is set when
+// a user's presence or status changed.
 type Change struct {
 	Channel string
 	User    string
 }
 
-// Store is the workspace state in process
 type Store struct {
 	backend  Backend
-	stateDir string // where the open list is saved
+	stateDir string
 
-	mu       sync.Mutex
-	snap     Snapshot
-	users    map[string]User
-	channels map[string]Channel
-	timeline map[string][]Message // top-level messages, ordered by TS
-	loaded   map[string]bool      // history fetched at least once
-	threads  map[threadKey][]Message
-	adding   map[string]bool // unknown channels being looked up
-	lastRead map[string]TS
-	// seen is the newest message the user has viewed in each channel, for
-	// slack's read cursor
-	seen         map[string]TS
-	marking      map[string]bool            // channels with a Mark call in flight
-	threadSeen   map[threadKey]TS           // the newest reply slack has been told the user read
-	mine         map[threadKey]bool         // threads the user posted in
-	newIn        map[threadKey]int          // unread replies in the user's threads
-	open         map[string]bool            // conversations the user chose to show
-	muted        map[string]map[string]bool // channels each user is muted in
-	last         string                     // the buffer the user last had open
-	mentions     []Mention
-	seenMentions int             // how many of mentions the user has seen in the status buffer
-	files        map[string]File // every attachment seen, by ID
-	link         Link
-	markErr      string // see MarkProblem
-	away         bool
-	presence     map[string]presence // other users, as last polled
-	autoAway     time.Duration       // idle time before going away; zero is never
-	autoBack     bool                // typing while away comes back
-	idle         *time.Timer         // fires after autoAway without Activity
-	stopped      bool                // ctx ended, so no more automatic presence
-	subs         map[int]func(Change)
-	nextSub      int
-	alert        func(Alert) // see OnAlert
-	awayStatus   string
-	onStatus     func(string)
-	posted       []msgKey
-	started      TS
+	mu            sync.Mutex
+	snap          Snapshot
+	users         map[string]User
+	channels      map[string]Channel
+	timeline      map[string][]Message // top-level only, ordered by TS
+	loaded        map[string]bool
+	threads       map[threadKey][]Message
+	lookingUp     map[string]bool
+	lastRead      map[string]TS
+	seen          map[string]TS
+	marking       map[string]bool
+	threadSeen    map[threadKey]TS
+	postedIn      map[threadKey]bool
+	unreadReplies map[threadKey]int
+	open          map[string]bool
+	mutedIn       map[string]map[string]bool // user, then channel
+	last          string
+	mentions      []Mention
+	seenMentions  int
+	files         map[string]File
+	link          Link
+	markErr       string
+	away          bool
+	presence      map[string]presence
+	autoAway      time.Duration // zero is never
+	autoBack      bool
+	idle          *time.Timer
+	stopped       bool
+	subs          map[int]func(Change)
+	nextSub       int
+	alert         func(Alert)
+	awayStatus    string
+	onStatus      func(string)
+	posted        []msgKey
+	started       TS
 }
 
 type msgKey struct {
@@ -77,11 +73,10 @@ type msgKey struct {
 
 const maxPosted = 1000
 
-// Alert is something to notify the user about
 type Alert struct {
 	Channel string
 	Msg     Message
-	// Open is set when the message is in the buffer the user is looking at
+	// Open is set when the message is in the buffer the user is looking at.
 	Open bool
 }
 
@@ -96,7 +91,6 @@ type Mention struct {
 	Msg     Message
 }
 
-// maxMentions bounds the mention log.
 const maxMentions = 500
 
 const (
@@ -113,36 +107,35 @@ func trim(msgs []Message) []Message {
 	return append(kept, msgs[cut:]...)
 }
 
-// NewStore makes a store over b that keeps the user's open list in stateDir
+// An empty stateDir means the open list is not saved.
 func NewStore(b Backend, stateDir string) *Store {
 	return &Store{
-		backend:    b,
-		stateDir:   stateDir,
-		open:       map[string]bool{},
-		muted:      map[string]map[string]bool{},
-		files:      map[string]File{},
-		timeline:   map[string][]Message{},
-		loaded:     map[string]bool{},
-		threads:    map[threadKey][]Message{},
-		adding:     map[string]bool{},
-		lastRead:   map[string]TS{},
-		seen:       map[string]TS{},
-		marking:    map[string]bool{},
-		threadSeen: map[threadKey]TS{},
-		mine:       map[threadKey]bool{},
-		newIn:      map[threadKey]int{},
-		subs:       map[int]func(Change){},
-		presence:   map[string]presence{},
+		backend:       b,
+		stateDir:      stateDir,
+		open:          map[string]bool{},
+		mutedIn:       map[string]map[string]bool{},
+		files:         map[string]File{},
+		timeline:      map[string][]Message{},
+		loaded:        map[string]bool{},
+		threads:       map[threadKey][]Message{},
+		lookingUp:     map[string]bool{},
+		lastRead:      map[string]TS{},
+		seen:          map[string]TS{},
+		marking:       map[string]bool{},
+		threadSeen:    map[threadKey]TS{},
+		postedIn:      map[threadKey]bool{},
+		unreadReplies: map[threadKey]int{},
+		subs:          map[int]func(Change){},
+		presence:      map[string]presence{},
 	}
 }
 
-// Start bootstraps the workspace and listens for live events until ctx ends
 func (s *Store) Start(ctx context.Context) error {
 	snap, err := s.backend.Bootstrap(ctx)
 	if err != nil {
 		return err
 	}
-	// nothing sent before launch counts as unread until slack's read cursor gets here
+	// Nothing sent before launch counts as unread until slack's read cursor arrives.
 	now := TSFromTime(time.Now())
 	s.mu.Lock()
 	s.started = now
@@ -183,7 +176,6 @@ func (s *Store) Start(ctx context.Context) error {
 	return nil
 }
 
-// readCursors fetches Slack's read cursor for each open conversation
 func (s *Store) readCursors(ctx context.Context) {
 	s.mu.Lock()
 	var ids []string
@@ -208,7 +200,6 @@ func (s *Store) readCursors(ctx context.Context) {
 	}
 }
 
-// setReadCursor moves the channel's read cursor to slack's
 func (s *Store) setReadCursor(channel string, ts TS) {
 	s.mu.Lock()
 	apply := ts != "" && ts > s.seen[channel]
@@ -315,7 +306,6 @@ func (s *Store) SetOpen(channel string, open bool) {
 	}
 }
 
-// Last is the buffer the user last had open that we'll reopen on launch
 func (s *Store) Last() string { s.mu.Lock(); defer s.mu.Unlock(); return s.last }
 
 func (s *Store) SetLast(buffer string) {
@@ -343,7 +333,6 @@ func (s *Store) SeeMentions() {
 	}
 }
 
-// Pings counts unread messages that would have sent a notification
 func (s *Store) Pings() int {
 	s.mu.Lock()
 	n := len(s.mentions) - s.seenMentions
@@ -417,7 +406,7 @@ func (s *Store) Apply(ev Event) {
 	case Posted:
 		ch.Channel = e.Channel
 		key := msgKey{e.Channel, e.Msg.TS}
-		if slices.Contains(s.posted, key) || s.has(e.Channel, e.Msg.ThreadTS, e.Msg.TS) {
+		if slices.Contains(s.posted, key) || s.has(e.Channel, e.Msg.ThreadTS, e.Msg.TS) || e.Msg.Broadcast && s.has(e.Channel, "", e.Msg.TS) {
 			break
 		}
 		if s.posted = append(s.posted, key); len(s.posted) > maxPosted {
@@ -427,11 +416,10 @@ func (s *Store) Apply(ev Event) {
 		fromOther := e.Msg.User != s.snap.Self && !e.Msg.System && !s.isMuted(e.Channel, e.Msg.User)
 		late := e.Msg.TS < s.started
 		c, known := s.channels[e.Channel]
-		if !known && !s.adding[e.Channel] {
-			s.adding[e.Channel] = true
+		if !known && !s.lookingUp[e.Channel] {
+			s.lookingUp[e.Channel] = true
 			go s.discover(e.Channel, fromOther)
 		}
-		// direct message from someone reopens the conversation
 		if known && c.Kind.IsDM() && fromOther && !s.open[e.Channel] {
 			s.open[e.Channel] = true
 			s.saveLocked()
@@ -463,7 +451,10 @@ func (s *Store) Apply(ev Event) {
 		s.update(e.Channel, func(msgs []Message) []Message {
 			if i, ok := find(msgs, e.Msg.TS); ok {
 				if e.Msg.Reactions == nil {
-					e.Msg.Reactions = msgs[i].Reactions // an edit that doesn't say keeps them
+					e.Msg.Reactions = msgs[i].Reactions // nil means the edit didn't say, not that they were removed
+				}
+				if e.Msg.Root == "" {
+					e.Msg.Root = msgs[i].Root // slack sends the parent with a broadcast but not with its edits
 				}
 				e.Msg.NewReplies = msgs[i].NewReplies
 				msgs[i] = e.Msg
@@ -564,7 +555,6 @@ func (s *Store) subscribers() []func(Change) {
 	return out
 }
 
-// notify tells every subscriber about c
 func (s *Store) notify(c Change) {
 	s.mu.Lock()
 	subs := s.subscribers()
@@ -574,8 +564,8 @@ func (s *Store) notify(c Change) {
 	}
 }
 
-// Load fetches a channel's history once. live messages that arrived before
-// the fetch are kept and merged by timestamp
+// Load fetches a channel's history only once. Live messages that arrived
+// before the fetch are merged in by timestamp.
 func (s *Store) Load(ctx context.Context, channel string) {
 	s.mu.Lock()
 	done := s.loaded[channel]
@@ -593,7 +583,7 @@ func (s *Store) Load(ctx context.Context, channel string) {
 			s.mu.Unlock()
 			return
 		}
-		top := slices.DeleteFunc(msgs, Message.IsReply)
+		top := slices.DeleteFunc(msgs, func(m Message) bool { return m.IsReply() && !m.Broadcast })
 		s.mu.Lock()
 		s.index(top...)
 		s.timeline[channel] = trim(merge(s.timeline[channel], top))
@@ -606,20 +596,18 @@ func (s *Store) Load(ctx context.Context, channel string) {
 	}()
 }
 
-// discover adds a channel first seen in a live event
 func (s *Store) discover(channel string, fromOther bool) {
 	c, err := s.backend.Info(context.Background(), channel)
 	if err != nil {
 		log.Printf("info %s: %v", channel, err)
 		s.mu.Lock()
-		delete(s.adding, channel)
+		delete(s.lookingUp, channel)
 		s.mu.Unlock()
 		return
 	}
-	s.add(c, "", fromOther && c.Kind.IsDM()) // the message that revealed it is unread
+	s.add(c, "", fromOther && c.Kind.IsDM()) // no cursor, so the message that revealed it is unread
 }
 
-// add records a channel the user is now in, and opens it when open is set
 func (s *Store) add(c Channel, unreadAfter TS, open bool) {
 	s.mu.Lock()
 	s.channels[c.ID] = c
@@ -630,7 +618,7 @@ func (s *Store) add(c Channel, unreadAfter TS, open bool) {
 	if _, ok := s.lastRead[c.ID]; !ok {
 		s.lastRead[c.ID] = unreadAfter
 	}
-	delete(s.adding, c.ID)
+	delete(s.lookingUp, c.ID)
 	subs := s.subscribers()
 	s.mu.Unlock()
 	for _, fn := range subs {
@@ -638,7 +626,6 @@ func (s *Store) add(c Channel, unreadAfter TS, open bool) {
 	}
 }
 
-// Join joins a public channel in slack by name and opens it
 func (s *Store) Join(ctx context.Context, name string) (Channel, error) {
 	c, err := s.backend.Join(ctx, name)
 	if err != nil {
@@ -648,7 +635,6 @@ func (s *Store) Join(ctx context.Context, name string) (Channel, error) {
 	return c, nil
 }
 
-// OpenDM starts or finds the direct message with a user and opens it
 func (s *Store) OpenDM(ctx context.Context, user string) (Channel, error) {
 	c, err := s.backend.OpenDM(ctx, user)
 	if err != nil {
@@ -663,7 +649,7 @@ type threadKey struct {
 	ts      TS
 }
 
-// LoadThread fetches a thread once, after which live replies work the same as a channel
+// LoadThread fetches a thread only once. Live replies keep it current after that.
 func (s *Store) LoadThread(ctx context.Context, channel string, thread TS) {
 	k := threadKey{channel, thread}
 	s.mu.Lock()
@@ -685,9 +671,9 @@ func (s *Store) LoadThread(ctx context.Context, channel string, thread TS) {
 			s.index(msgs...)
 			s.threads[k] = merge(s.threads[k], msgs)
 			if slices.ContainsFunc(msgs, func(m Message) bool { return m.User == s.snap.Self }) {
-				s.mine[k] = true
+				s.postedIn[k] = true
 			}
-			if s.newIn[k] > 0 {
+			if s.unreadReplies[k] > 0 {
 				s.showParent(k)
 			}
 		}
@@ -699,14 +685,13 @@ func (s *Store) LoadThread(ctx context.Context, channel string, thread TS) {
 	}()
 }
 
-// Thread returns a copy of a loaded thread
+// Thread returns a copy.
 func (s *Store) Thread(channel string, thread TS) []Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.visible(channel, s.threads[threadKey{channel, thread}])
 }
 
-// index records the messages' attachments so File can find them
 func (s *Store) index(msgs ...Message) {
 	for _, m := range msgs {
 		for _, f := range m.Files {
@@ -715,7 +700,6 @@ func (s *Store) index(msgs ...Message) {
 	}
 }
 
-// File looks up an attachment seen on any message
 func (s *Store) File(id string) (File, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -723,7 +707,6 @@ func (s *Store) File(id string) (File, bool) {
 	return f, ok
 }
 
-// FileFailed records why an attachment's preview couldn't be fetched
 func (s *Store) FileFailed(id, reason string) {
 	s.mu.Lock()
 	f, ok := s.files[id]
@@ -760,7 +743,6 @@ func (s *Store) FileFailed(id, reason string) {
 	}
 }
 
-// Download writes an attachment's preview to w
 func (s *Store) Download(ctx context.Context, id string, full bool, w io.Writer) error {
 	f, ok := s.File(id)
 	if !ok {
@@ -801,7 +783,7 @@ func (s *Store) Send(ctx context.Context, channel string, thread TS, text string
 		return msgs
 	})
 	if err == nil && !s.has(channel, thread, ts) {
-		// slack's echo will replace it, bumping the reply count when it does
+		// Slack's echo replaces it and bumps the reply count then.
 		m.TS, m.Pending = ts, false
 		s.put(channel, m)
 	}
@@ -810,10 +792,11 @@ func (s *Store) Send(ctx context.Context, channel string, thread TS, text string
 	return err
 }
 
-// put adds or replaces a message in its timeline, or in its thread if that's loaded
 func (s *Store) put(channel string, m Message) {
-	if !m.IsReply() {
+	if !m.IsReply() || m.Broadcast {
 		s.timeline[channel] = trim(merge(s.timeline[channel], []Message{m}))
+	}
+	if !m.IsReply() {
 		return
 	}
 	k := threadKey{channel, m.ThreadTS}
@@ -852,7 +835,6 @@ func (s *Store) React(ctx context.Context, channel string, ts TS, name string) e
 	return s.backend.React(ctx, channel, ts, name)
 }
 
-// Newest is the newest message in the channel's timeline or thread
 func (s *Store) Newest(channel string, thread TS) (Message, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -880,7 +862,6 @@ func (s *Store) SetTopic(ctx context.Context, channel, topic string) error {
 	return s.backend.SetTopic(ctx, channel, topic)
 }
 
-// LastOwn is the user's newest message in the channel's timeline or thread
 func (s *Store) LastOwn(channel string, thread TS) (Message, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -896,14 +877,12 @@ func (s *Store) LastOwn(channel string, thread TS) (Message, bool) {
 	return Message{}, false
 }
 
-// LastRead is the channel's read cursor
 func (s *Store) LastRead(channel string) TS {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastRead[channel]
 }
 
-// MarkRead moves the channel's read cursor
 func (s *Store) MarkRead(channel string) {
 	s.mu.Lock()
 	var newest TS // a message still sending has no slack timestamp to mark
@@ -937,7 +916,6 @@ func (s *Store) MarkRead(channel string) {
 	}
 }
 
-// pushRead tells Slack the newest message the user has seen
 func (s *Store) pushRead(channel string) {
 	s.mu.Lock()
 	if s.marking[channel] {
@@ -982,14 +960,13 @@ func (s *Store) Team() string { s.mu.Lock(); defer s.mu.Unlock(); return s.snap.
 func (s *Store) Self() string { s.mu.Lock(); defer s.mu.Unlock(); return s.snap.Self }
 func (s *Store) Link() Link   { s.mu.Lock(); defer s.mu.Unlock(); return s.link }
 
-// MarkProblem says why slack last refused to mark something read
+// MarkProblem is why slack last refused to mark something read, or "" once a mark succeeds.
 func (s *Store) MarkProblem() string { s.mu.Lock(); defer s.mu.Unlock(); return s.markErr }
 
 var markScope = map[ChannelKind]string{
 	Public: "channels:write", Private: "groups:write", Group: "mpim:write", Direct: "im:write",
 }
 
-// markProblem explains a refused mark
 func (s *Store) markProblem(channel string, err error) string {
 	kind := s.channels[channel].Kind
 	if strings.Contains(err.Error(), "missing_scope") {
@@ -1017,7 +994,7 @@ func (s *Store) Channel(id string) (Channel, bool) {
 	return c, ok
 }
 
-// Channels lists the channels the user is in, by ID.
+// Channels are sorted by ID.
 func (s *Store) Channels() []Channel {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1026,15 +1003,13 @@ func (s *Store) Channels() []Channel {
 	return out
 }
 
-// Users lists everyone in the workspace
 func (s *Store) Users() []User {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.snap.Users)
 }
 
-// Timeline returns a copy of the channel's top-level messages and if the history
-// has been requested
+// Timeline returns a copy, and whether the history has been requested.
 func (s *Store) Timeline(channel string) ([]Message, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1054,14 +1029,13 @@ func (s *Store) Unread(channel string) int {
 	return n
 }
 
-// MentionsMe reports if a message from someone else names the user
+// MentionsMe is false for the user's own messages.
 func (s *Store) MentionsMe(m Message) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return m.User != s.snap.Self && s.names(m.Text)
 }
 
-// UnreadMentions counts unread messages that name the user
 func (s *Store) UnreadMentions(channel string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

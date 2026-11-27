@@ -15,11 +15,11 @@ type mentionPopup struct {
 	w       *window
 	field   *caution.Node
 	channel func() string
-	host    *caution.Node // the panel the popup floats in
+	host    *caution.Node
 	popup   *caution.Node
 	list    *caution.Node
 
-	head    string // the text before the "@"
+	head    string
 	matches []string
 	sel     int
 }
@@ -34,7 +34,6 @@ func (w *window) newMentionPopup(field *caution.Node, channel func() string, hos
 
 func (p *mentionPopup) open() bool { return len(p.matches) > 0 }
 
-// update follows the text: the popup shows while it ends in "@" and name characters
 func (p *mentionPopup) update(value string) {
 	head, word := mentionWord(value)
 	var matches []string
@@ -45,7 +44,7 @@ func (p *mentionPopup) update(value string) {
 	p.render()
 }
 
-// mentionWord splits text before an "@word" that ends it, or gives "" for word
+// mentionWord's word is "" unless text ends in "@word".
 func mentionWord(text string) (head, word string) {
 	i := strings.LastIndexAny(text, " \t\n")
 	last := text[i+1:]

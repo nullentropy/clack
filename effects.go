@@ -41,7 +41,6 @@ vec4 effect(vec2 uv) {
   c.b = src(u - vec2(1.5 * px.x, 0.0)).b;
   float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
   c.rgb = mix(c.rgb, vec3(luma), 0.2);
-  // a brighter band rolls down the screen
   float band = abs(uv.y - fract(u_time * 0.07));
   c.rgb *= 1.0 + 0.07 * (1.0 - smoothstep(0.0, 0.05, band));
   c.rgb += (hash(floor(uv * u_res) + floor(u_time * 24.0)) - 0.5) * 0.06;

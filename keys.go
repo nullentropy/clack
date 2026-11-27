@@ -8,7 +8,6 @@ import (
 	"github.com/nullentropy/caution"
 )
 
-// bindKeys registers the session's shortcuts once
 func (sc *screen) bindKeys() {
 	on := func(fn func(w *window), combos ...string) {
 		for _, c := range combos {
@@ -33,7 +32,6 @@ func (w *window) buffers() []string {
 	return keys
 }
 
-// counting from 1
 func (w *window) openNth(n int) {
 	if keys := w.buffers(); n <= len(keys) {
 		w.open(keys[n-1])
@@ -82,7 +80,6 @@ func (w *window) showHelp() {
 				Anchor(caution.A{Left: caution.Px(16), Top: caution.Px(14), Right: caution.Px(16)}))))
 }
 
-// switchLimit is how many matches the quick switcher lists
 const switchLimit = 8
 
 func (w *window) showSwitcher() {
@@ -97,7 +94,7 @@ func (w *window) showSwitcher() {
 	field := caution.TextField("").Placeholder("Jump to a conversation…").OnInput(sw.filter).
 		OnNav(sw.move).OnSubmit(func(string) { sw.choose() })
 	sw.filter("")
-	// the title bar, padding and the field, then the rows
+	// 110 is the title bar, padding and field; each row is 26.
 	w.showDialog("Jump to", 440, 110+switchLimit*26, caution.VStack().Gap(8).Align("stretch").Pad(12).Anchor(fill).Kids(field, sw.list))
 	field.Focus()
 }

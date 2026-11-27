@@ -249,3 +249,71 @@ func TestMarkThreadSendsTheReplyReadUpTo(t *testing.T) {
 		t.Fatalf("err = %v, want Slack's refusal", err)
 	}
 }
+
+const (
+	towelParent = `{"type": "message", "user": "U1", "text": "Has anyone seen <@U2>'s towel? I want to borrow it.",
+		"ts": "1700000000.000100", "thread_ts": "1700000000.000100", "reply_count": 2, "reply_users_count": 2,
+		"latest_reply": "1700000300.000300", "reply_users": ["U3", "U2"], "is_locked": false, "subscribed": false}`
+	towelReply = `{"type": "message", "user": "U3", "text": "Check the Heart of Gold's galley.",
+		"ts": "1700000200.000200", "thread_ts": "1700000000.000100", "parent_user_id": "U1"}`
+	towelBroadcast = `{"type": "message", "subtype": "thread_broadcast", "user": "U2",
+		"text": "Found it. Top drawer of my desk.", "ts": "1700000300.000300", "thread_ts": "1700000000.000100",
+		"client_msg_id": "6f1c2a3e-42aa-4b2c-9d1e-000000000042", "reactions": [{"name": "towel", "users": ["U1"], "count": 1}],
+		"root": ` + towelParent + `}`
+)
+
+func TestThreadBroadcastsKeepTheirThreadAndParent(t *testing.T) {
+	want := chat.Message{TS: "1700000300.000300", User: "U2", Text: "Found it. Top drawer of my desk.",
+		ThreadTS: "1700000000.000100", Broadcast: true, Root: "Has anyone seen <@U2>'s towel? I want to borrow it.",
+		Reactions: []chat.Reaction{{Name: "towel", Users: []string{"U1"}}}}
+
+	var event map[string]any
+	if err := json.Unmarshal([]byte(towelBroadcast), &event); err != nil {
+		t.Fatal(err)
+	}
+	event["channel"], event["channel_type"], event["event_ts"] = "C1", "channel", "1700000300.000300"
+	inner, _ := json.Marshal(event)
+	payload := `{"token": "x", "team_id": "T1", "api_app_id": "A1", "type": "event_callback",
+		"event_id": "Ev42", "event_time": 1700000300, "event": ` + string(inner) + `}`
+	parsed, err := slackevents.ParseEvent(json.RawMessage(payload), slackevents.OptionNoVerifyToken())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []chat.Event
+	(&Backend{}).handle(nil, socketmode.Event{Type: socketmode.EventTypeEventsAPI, Data: parsed}, func(e chat.Event) {
+		got = append(got, e)
+	})
+	if len(got) != 1 {
+		t.Fatalf("live events = %+v, want one Posted", got)
+	}
+	if p, ok := got[0].(chat.Posted); !ok || p.Channel != "C1" || !p.Msg.Equal(want) {
+		t.Fatalf("live event = %+v, want %+v", got[0], want)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/conversations.history":
+			fmt.Fprint(w, `{"ok": true, "messages": [`+towelBroadcast+`, `+towelParent+`]}`)
+		case "/conversations.replies":
+			fmt.Fprint(w, `{"ok": true, "has_more": false, "messages": [`+towelParent+`, `+towelReply+`, `+towelBroadcast+`]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	b := &Backend{api: slack.New("xoxp-x", slack.OptionAPIURL(srv.URL+"/")), bots: map[string]string{}}
+	history, err := b.History(context.Background(), "C1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 || !history[1].Equal(want) {
+		t.Fatalf("history = %+v, want the parent then %+v", history, want)
+	}
+	thread, err := b.Replies(context.Background(), "C1", "1700000000.000100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(thread) != 3 || !thread[2].Equal(want) {
+		t.Fatalf("thread = %+v, want it to end with %+v", thread, want)
+	}
+}

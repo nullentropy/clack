@@ -50,14 +50,14 @@ func TestTSRoundTrip(t *testing.T) {
 type fakeBackend struct {
 	history []Message
 	replies []Message
-	info    map[string]Channel // channels Info, Join and OpenDM can find
-	cursors map[string]TS      // slack's read cursor by channel
+	info    map[string]Channel
+	cursors map[string]TS
 
 	mu          sync.Mutex
 	marked      []TS
-	threadMarks []TS            // the reply each MarkThread call read up to
-	presence    chan bool       // each SetAway
-	away        map[string]bool // other users' presence
+	threadMarks []TS
+	presence    chan bool
+	away        map[string]bool
 	awayErr     error
 	send        func(text string) (TS, error) // nil posts straight away
 }
@@ -88,6 +88,7 @@ func (f *fakeBackend) React(context.Context, string, TS, string) error   { retur
 func (f *fakeBackend) Members(context.Context, string) ([]string, error) { return nil, nil }
 func (f *fakeBackend) Search(context.Context, string) ([]Hit, error)     { return nil, nil }
 func (f *fakeBackend) SetTopic(context.Context, string, string) error    { return nil }
+func (f *fakeBackend) SetStatus(context.Context, string) error           { return nil }
 
 func (f *fakeBackend) SetAway(_ context.Context, away bool) error {
 	if f.presence != nil {
@@ -599,7 +600,7 @@ func TestNewRepliesBringBackAParentTooOldForTheTimeline(t *testing.T) {
 	}
 	post(Message{TS: answer, User: "U2", ThreadTS: mine, Text: "an answer"})
 	select {
-	case <-changes: // the thread loads
+	case <-changes:
 	case <-time.After(time.Second):
 	}
 	if m, ok := parent(); !ok || m.NewReplies != 1 {
@@ -733,7 +734,7 @@ func TestAMessageFromBeforeLaunchDoesNotAlert(t *testing.T) {
 	s, changes := startStore(t, &fakeBackend{})
 	alerts := 0
 	s.OnAlert(func(Alert) { alerts++ })
-	// Slack re-sends what the previous run never acked, minutes later
+	// Slack re-sends what the previous run never acked, minutes later.
 	s.Apply(Posted{Channel: "D1", Msg: Message{TS: TSFromTime(time.Now().Add(-6 * time.Minute)), User: "U1", Text: "hey"}})
 	<-changes
 	if alerts != 0 {
