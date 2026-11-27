@@ -185,6 +185,11 @@ func (w *window) animate(img *caution.Node, f chat.File, full bool) {
 					if hidden = w.untilShown(); hidden == nil {
 						img.SetSrc(srcs[i])
 					}
+				} else if !w.closed && under(img, w.threadView) {
+					if w.parked == nil {
+						w.parked = map[*caution.Node]parkedGIF{}
+					}
+					w.parked[img] = parkedGIF{f, full}
 				}
 				shown <- on
 			})
@@ -231,12 +236,28 @@ func (w *window) noteVisible(visible bool) {
 	}
 }
 
-func (w *window) shows(n *caution.Node) bool {
-	if w.closed {
-		return false
+type parkedGIF struct {
+	f    chat.File
+	full bool
+}
+
+func (w *window) unpark() {
+	parked := w.parked
+	w.parked = nil
+	for img, p := range parked {
+		if w.shows(img) {
+			w.animate(img, p.f, p.full)
+		}
 	}
+}
+
+func (w *window) shows(n *caution.Node) bool {
+	return !w.closed && under(n, w.root)
+}
+
+func under(n, top *caution.Node) bool {
 	for ; n != nil; n = n.Parent() {
-		if n == w.root {
+		if n == top {
 			return true
 		}
 	}

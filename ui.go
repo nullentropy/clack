@@ -62,6 +62,7 @@ type window struct {
 
 	showing chan struct{}
 	closed  bool
+	parked  map[*caution.Node]parkedGIF
 
 	backdrop *caution.Node
 	backFrag string // what backdrop shows, "" for nothing
@@ -544,6 +545,7 @@ func (w *window) openThread(channel string, ts chat.TS) {
 	if last := w.renderThread(); last != nil {
 		last.Reveal()
 	}
+	w.unpark()
 	w.threadComposer.Focus()
 }
 
