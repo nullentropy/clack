@@ -26,6 +26,8 @@ github.com/nullentropy/caution v0.34.0 h1:rST/9ACpQeshYWlHAM/+pzFxGh25dupkFNbL4f
 github.com/nullentropy/caution v0.34.0/go.mod h1:xN8elbmMZHGlJ23vrXcL5fyUMMBGLsGMVPUjS39ozGw=
 github.com/nullentropy/caution v0.34.1 h1:7Jv/teVGn2RaL2wPaVCpMHRw6yJpxGpvJYooZh6lxhI=
 github.com/nullentropy/caution v0.34.1/go.mod h1:xN8elbmMZHGlJ23vrXcL5fyUMMBGLsGMVPUjS39ozGw=
+github.com/nullentropy/caution v0.34.3 h1:RixPBZvv4nJHSmKJ9vcg3kBS+G+25h1LfFZYrL/x7eI=
+github.com/nullentropy/caution v0.34.3/go.mod h1:xN8elbmMZHGlJ23vrXcL5fyUMMBGLsGMVPUjS39ozGw=
 github.com/rs/zerolog v1.35.1 h1:m7xQeoiLIiV0BCEY4Hs+j2NG4Gp2o2KPKmhnnLiazKI=
 github.com/rs/zerolog v1.35.1/go.mod h1:EjML9kdfa/RMA7h/6z6pYmq1ykOuA8/mjWaEvGI+jcw=
 github.com/slack-go/slack v0.32.0 h1:N9zo22Hoz5Hx+rXwtRZSdkJP/3FrQ24eBGSf3A5S3EE=
